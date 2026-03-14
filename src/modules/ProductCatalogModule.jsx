@@ -159,7 +159,6 @@ export default function ProductCatalogModule() {
                   <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Permit</th>
                   <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>OSB/Sheet</th>
                   <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Warranty/Sq</th>
-                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Tear-off/Sq</th>
                   <th style={{ textAlign: 'left', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Basis</th>
                 </tr>
               </thead>
@@ -175,7 +174,6 @@ export default function ProductCatalogModule() {
                       <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.permitCost)}</td>
                       <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.osbPerSheet)}</td>
                       <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.warrantyPerSq)}</td>
-                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.tearOffPerSquare)}</td>
                       <td style={{ padding: '12px 8px', color: C.gray700 }}>{labor.laborBasis}</td>
                     </tr>
                   );

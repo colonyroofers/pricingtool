@@ -737,15 +737,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                     <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborCost)}</td>
                   </tr>
-                  {estimateType !== 'tile' && (
-                    <tr style={{ backgroundColor: C.blueBg }}>
-                      <td style={tdStyle}>Tearoff Labor ({laborSquares} SQ × {fmt(stLabor.tearOffPerSquare)}/SQ)</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(stLabor.tearOffPerSquare)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborSquares * stLabor.tearOffPerSquare)}</td>
-                    </tr>
-                  )}
                   {estimateType !== 'tile' && warrantyEnabled && (
                     <tr style={{ backgroundColor: C.blueBg }}>
                       <td style={tdStyle}>Warranty ({laborSquares} SQ × {fmt(stLabor.warrantyPerSq)}/SQ)</td>
@@ -760,16 +751,15 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
 
               {/* Building subtotal */}
               {(() => {
-                const tearOff = estimateType !== 'tile' ? laborSquares * stLabor.tearOffPerSquare : 0;
                 const warranty = (estimateType !== 'tile' && warrantyEnabled) ? laborSquares * stLabor.warrantyPerSq : 0;
-                const bldgSubtotal = matTotal + laborCost + tearOff + warranty + matTotal * (jobTaxPercent / 100);
+                const bldgSubtotal = matTotal + laborCost + warranty + matTotal * (jobTaxPercent / 100);
                 return (
                   <div style={{
                     backgroundColor: C.gray100, padding: '8px 16px',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}>
                     <span style={{ fontSize: 12, color: C.gray600 }}>
-                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost + tearOff)}{warrantyEnabled ? ` · Warranty: ${fmt(warranty)}` : ''} · Tax ({(jobTaxPercent || 7.5).toFixed(1)}%): {fmt(matTotal * (jobTaxPercent / 100))}
+                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost)}{warrantyEnabled ? ` · Warranty: ${fmt(warranty)}` : ''} · Tax ({(jobTaxPercent || 7.5).toFixed(1)}%): {fmt(matTotal * (jobTaxPercent / 100))}
                     </span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
                       Subtotal: {fmt(bldgSubtotal)}
@@ -927,13 +917,12 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 </span>
               </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
                   <thead>
                     <tr style={{ backgroundColor: C.gray50 }}>
                       <th style={thStyle}>Bldg</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Material</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Labor</th>
-                      <th style={{ ...thStyle, textAlign: 'right' }}>Tearoff</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Warranty</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Tax</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
@@ -945,7 +934,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                   </thead>
                   <tbody>
                     {summary.buildings.map((b, i) => {
-                      const bldgSub = b.materialCost + b.laborCost + b.tearOffCost + b.warrantyCost + b.taxAmount + equipPerBldg;
+                      const bldgSub = b.materialCost + b.laborCost + b.warrantyCost + b.taxAmount + equipPerBldg;
                       const bldgMargin = bldgSub / (1 - marginRate) - bldgSub;
                       const bldgTotal = bldgSub + bldgMargin;
                       const bldgSquares = Math.ceil((buildings[i]?.pitchedArea || buildings[i]?.totalArea || 1) / 100);
@@ -955,7 +944,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                           <td style={tdStyle}>{buildings[i]?.siteplanNum || i + 1}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.materialCost)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.laborCost)}</td>
-                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.tearOffCost)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.warrantyCost)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.taxAmount)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(equipPerBldg)}</td>
@@ -973,7 +961,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                       <td style={{ ...tdStyle, fontWeight: 700 }}>Totals</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalMaterial)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalLabor)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalTearOff)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalWarranty)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalTax)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(totalEquip)}</td>
@@ -988,7 +975,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                     {/* Equipment breakdown */}
                     {totalEquip > 0 && (
                       <tr style={{ backgroundColor: C.gray50 }}>
-                        <td colSpan={7} style={{ ...tdStyle, fontSize: 11, color: C.gray500 }}>
+                        <td colSpan={6} style={{ ...tdStyle, fontSize: 11, color: C.gray500 }}>
                           Equipment: Forklift {fmt(equipForklift)} · Dumpster {fmt(equipDumpster)} · Permit {fmt(equipPermit)}
                         </td>
                         <td colSpan={4} />
@@ -1260,7 +1247,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
 
     // Build rows with all columns
     const pricingRows = costData.rows.map(row => {
-      const bldgSubtotal = (row.materialCost || 0) + (row.laborCost || 0) + (row.tearOffCost || 0)
+      const bldgSubtotal = (row.materialCost || 0) + (row.laborCost || 0)
         + (row.warrantyCost || 0) + forkliftPer + dumpsterPer + permitPer + (row.taxAmount || 0);
       const jobMarginDecimal = (jobMarginPercent || 25) / 100;
       const bldgMargin = bldgSubtotal / (1 - jobMarginDecimal) - bldgSubtotal;
@@ -1272,7 +1259,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
     const colTotals = {
       materialCost: pricingRows.reduce((s, r) => s + (r.materialCost || 0), 0),
       laborCost: pricingRows.reduce((s, r) => s + (r.laborCost || 0), 0),
-      tearOffCost: pricingRows.reduce((s, r) => s + (r.tearOffCost || 0), 0),
       warrantyCost: pricingRows.reduce((s, r) => s + (r.warrantyCost || 0), 0),
       forklift: pricingRows.reduce((s, r) => s + r.forklift, 0),
       dumpster: pricingRows.reduce((s, r) => s + r.dumpster, 0),
@@ -1361,7 +1347,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 <th style={{ ...ssHeadL, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Building</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Material</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Install</th>
-                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tearoff</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Warranty</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Forklift</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Dumpster</th>
@@ -1379,7 +1364,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                   <td style={{ ...tdStyle, padding: '6px 10px', fontSize: 12, fontWeight: 500, borderRight: `1px solid ${C.gray200}` }}>Bldg {row.building}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.materialCost)}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.laborCost)}</td>
-                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.tearOffCost || 0)}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.warrantyCost || 0)}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.forklift)}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.dumpster)}</td>
@@ -1397,7 +1381,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 <td style={{ padding: '10px 10px', fontSize: 12, fontWeight: 700, color: C.white }}>TOTALS</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.materialCost)}</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.laborCost)}</td>
-                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.tearOffCost)}</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.warrantyCost)}</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.forklift)}</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.dumpster)}</td>

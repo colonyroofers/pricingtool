@@ -134,14 +134,15 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
   const { totalArea = 0, pitchedArea = 0 } = building;
   const laborSquares = Math.ceil((pitchedArea || totalArea) / 100);
   const laborCost = laborSquares * stLabor.laborPerSquare;
-  const tearOffCost = laborSquares * stLabor.tearOffPerSquare;
+  // Tearoff is included in install labor — not a separate cost
+  const tearOffCost = 0;
   const warrantyCost = laborSquares * stLabor.warrantyPerSq;
 
   // Tax on materials only
   const taxAmount = materialCost * stFin.taxRate;
 
   // Subtotal (equipment split at estimate level, not per-building)
-  const subtotal = materialCost + laborCost + tearOffCost + warrantyCost + taxAmount;
+  const subtotal = materialCost + laborCost + warrantyCost + taxAmount;
 
   // Margin: total = subtotal / (1 - margin%)
   const margin = subtotal / (1 - stFin.margin) - subtotal;
@@ -192,7 +193,7 @@ export const calculateEstimateCost = (buildings, materials, state, equipmentOver
     return { ...result, taxAmount: bldgTax, equipmentCost: equipmentPerBuilding, warrantyCost: warrantyEnabled ? result.warrantyCost : 0 };
   });
 
-  const grandSubtotal = grandMaterialCost + grandLaborCost + grandTearOffCost + grandWarrantyCost + totalEquipment + grandTaxAmount;
+  const grandSubtotal = grandMaterialCost + grandLaborCost + grandWarrantyCost + totalEquipment + grandTaxAmount;
   const grandMargin = grandSubtotal / (1 - marginRate) - grandSubtotal;
   const grandTotal = grandSubtotal + grandMargin;
 
