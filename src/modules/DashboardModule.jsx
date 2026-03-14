@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { C, ESTIMATE_TYPES, ESTIMATE_STATUSES, generateId, fmt } from '../utils/constants';
+import { C, ESTIMATE_TYPES, ESTIMATE_STATUSES, generateId, fmt, STATUS_CONFIG, KANBAN_COLUMNS, TERMINAL_STATUSES, DEADLINE_TYPES, LOSS_REASONS } from '../utils/constants';
 import KanbanBoard from '../components/KanbanBoard';
 import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { useToast } from '../components/Toast';
 
 const inputStyle = {
   padding: '10px 12px',
@@ -12,8 +14,9 @@ const inputStyle = {
   boxSizing: 'border-box',
 };
 
-export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate, team = [], currentUser = {}, onDuplicate }) {
+export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate, team = [], currentUser = {}, onDuplicate, canViewMargin = false }) {
   const ESTIMATORS = (team || []).filter(t => t.role === 'estimator' && t.active).map(t => ({ name: t.name, value: t.name }));
+  const { showToast } = useToast();
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEstimate, setEditingEstimate] = useState(null);
@@ -22,7 +25,12 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
   const [filterState, setFilterState] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterDeadline, setFilterDeadline] = useState('');
   const [sortBy, setSortBy] = useState('newest');
+  const [confirmDialog, setConfirmDialog] = useState({ open: false, title: '', message: '', onConfirm: null });
+  const [showLossDialog, setShowLossDialog] = useState(false);
+  const [lossTarget, setLossTarget] = useState(null);
+  const [lossReason, setLossReason] = useState('');
   const [formData, setFormData] = useState({
     propertyName: '',
     address: '',
@@ -92,28 +100,50 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
   };
 
   const handleDelete = (estimateId) => {
-    if (window.confirm('Delete this estimate? This cannot be undone.')) {
-      onDeleteEstimate(estimateId);
-    }
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Estimate',
+      message: 'Delete this estimate? This cannot be undone.',
+      onConfirm: () => {
+        onDeleteEstimate(estimateId);
+        setConfirmDialog({ ...confirmDialog, open: false });
+      },
+    });
+  };
+
+  const trackStatusChange = (estimate, newStatus) => {
+    const now = new Date().toISOString();
+    const statusHistory = estimate.statusHistory || [];
+    statusHistory.push({
+      status: newStatus,
+      timestamp: now,
+      changedBy: currentUser?.name || 'Unknown',
+    });
+    return { ...estimate, status: newStatus, statusHistory, lastStatusChange: now };
   };
 
   const handleDuplicate = (estimate) => {
     const duplicated = {
       id: generateId(),
       propertyName: estimate.propertyName + ' (Copy)',
-      address: estimate.address,
-      city: estimate.city,
+      address: '',
+      city: '',
       state: estimate.state,
-      zip: estimate.zip,
-      contact: estimate.contact,
-      phone: estimate.phone,
+      zip: '',
+      contact: '',
+      phone: '',
       type: estimate.type,
       estimator: '',
-      notes: estimate.notes,
-      bidDueDate: estimate.bidDueDate,
+      notes: '',
+      bidDueDate: '',
       status: 'unassigned',
-      buildings: estimate.buildings ? [...estimate.buildings] : [],
+      buildings: estimate.buildings ? JSON.parse(JSON.stringify(estimate.buildings)) : [],
+      materialList: estimate.materialList ? JSON.parse(JSON.stringify(estimate.materialList)) : [],
+      customLineItems: estimate.customLineItems ? JSON.parse(JSON.stringify(estimate.customLineItems)) : [],
+      totalCost: estimate.totalCost,
+      marginPercent: estimate.marginPercent,
       createdAt: new Date().toISOString(),
+      duplicatedFrom: estimate.id,
     };
     if (onDuplicate) {
       onDuplicate(duplicated);
@@ -145,6 +175,11 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
     // Apply status filter
     if (filterStatus !== 'all') {
       result = result.filter(e => e.status === filterStatus);
+    }
+
+    // Apply deadline filter
+    if (filterDeadline !== '') {
+      result = result.filter(e => (e.deadlineType || 'none') === filterDeadline);
     }
 
     // Apply sort
@@ -201,6 +236,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         }}
       />
       <select
+        className="pressable"
         value={filterState}
         onChange={(e) => setFilterState(e.target.value)}
         style={{
@@ -221,6 +257,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         <option value="TN">Tennessee</option>
       </select>
       <select
+        className="pressable"
         value={filterType}
         onChange={(e) => setFilterType(e.target.value)}
         style={{
@@ -240,6 +277,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         <option value="tpo">TPO</option>
       </select>
       <select
+        className="pressable"
         value={filterStatus}
         onChange={(e) => setFilterStatus(e.target.value)}
         style={{
@@ -254,13 +292,32 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         }}
       >
         <option value="all">All Statuses</option>
-        <option value="unassigned">Unassigned</option>
-        <option value="assigned">Assigned</option>
-        <option value="in_progress">In Progress</option>
-        <option value="submitted">Submitted</option>
-        <option value="approved">Approved</option>
+        {ESTIMATE_STATUSES.map(s => (
+          <option key={s} value={s}>{STATUS_CONFIG[s]?.label || s}</option>
+        ))}
       </select>
       <select
+        className="pressable"
+        value={filterDeadline}
+        onChange={(e) => setFilterDeadline(e.target.value)}
+        style={{
+          padding: '8px 10px',
+          border: `1px solid ${C.gray200}`,
+          borderRadius: 6,
+          fontSize: 12,
+          height: 34,
+          boxSizing: 'border-box',
+          backgroundColor: C.white,
+          cursor: 'pointer',
+        }}
+      >
+        <option value="">All Deadlines</option>
+        <option value="hard">Hard Deadline</option>
+        <option value="flexible">Flexible</option>
+        <option value="none">No Deadline</option>
+      </select>
+      <select
+        className="pressable"
         value={sortBy}
         onChange={(e) => setSortBy(e.target.value)}
         style={{
@@ -289,7 +346,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     return estimates
-      .filter(e => e.bidDueDate && e.status !== 'approved')
+      .filter(e => e.bidDueDate && !TERMINAL_STATUSES.includes(e.status))
       .map(e => {
         const d = new Date(e.bidDueDate + 'T00:00:00');
         const diff = Math.ceil((d - now) / (1000 * 60 * 60 * 24));
@@ -299,7 +356,13 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         else if (diff <= 7) urgency = 'soon';
         return { ...e, dueDate: d, daysDiff: diff, urgency };
       })
-      .sort((a, b) => a.dueDate - b.dueDate);
+      .sort((a, b) => {
+        // Hard deadlines first
+        const aHard = a.deadlineType === 'hard' ? 0 : 1;
+        const bHard = b.deadlineType === 'hard' ? 0 : 1;
+        if (aHard !== bHard) return aHard - bHard;
+        return a.dueDate - b.dueDate;
+      });
   };
 
   const renderBidTracker = () => {
@@ -324,7 +387,8 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {items.map(item => {
             const uc = urgencyColors[item.urgency];
-            const statusInfo = ESTIMATE_STATUSES.find(s => s.key === item.status);
+            const statusConfig = STATUS_CONFIG[item.status];
+            const deadlineTypeColor = item.deadlineType === 'hard' ? '#DC2626' : item.deadlineType === 'flexible' ? '#F59E0B' : C.gray500;
             return (
               <div key={item.id}
                 onClick={() => onOpenEstimate(item)}
@@ -333,6 +397,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                   padding: '8px 12px', borderRadius: 6,
                   backgroundColor: uc.bg, cursor: 'pointer',
                   transition: 'opacity 0.15s',
+                  borderLeft: `3px solid ${deadlineTypeColor}`,
                 }}
               >
                 <div style={{
@@ -348,9 +413,14 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                     {item.propertyName}
                   </div>
                   <div style={{ fontSize: 11, color: C.gray500 }}>
-                    {item.estimator || 'Unassigned'} · {statusInfo?.label || item.status}
+                    {item.estimator || 'Unassigned'} · {statusConfig?.label || item.status}
                   </div>
                 </div>
+                {item.deadlineType && (
+                  <span style={{ fontSize: 10, fontWeight: 600, color: deadlineTypeColor, textTransform: 'uppercase' }}>
+                    {item.deadlineType}
+                  </span>
+                )}
                 <div style={{ fontSize: 11, fontWeight: 600, color: uc.color, whiteSpace: 'nowrap' }}>
                   {item.daysDiff < 0 ? `${Math.abs(item.daysDiff)}d overdue` :
                    item.daysDiff === 0 ? 'Today' :
@@ -383,6 +453,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                 <th style={thStyle}>Estimator</th>
                 <th style={thStyle}>Bid Due</th>
                 <th style={thStyle}>Status</th>
+                {canViewMargin && <th style={{ ...thStyle, textAlign: 'right' }}>Margin</th>}
                 <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
                 <th style={{ ...thStyle, textAlign: 'center', width: 80 }}>Actions</th>
               </tr>
@@ -390,7 +461,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
             <tbody>
               {filteredEstimates.map((est, i) => {
                 const typeInfo = ESTIMATE_TYPES.find(t => t.key === est.type) || {};
-                const statusInfo = ESTIMATE_STATUSES.find(s => s.key === est.status) || {};
+                const statusInfo = STATUS_CONFIG[est.status] || {};
                 let dueBadge = null;
                 if (est.bidDueDate) {
                   const d = new Date(est.bidDueDate + 'T00:00:00');
@@ -454,25 +525,50 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                         {statusInfo.label}
                       </span>
                     </td>
+                    {canViewMargin && (
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: (est.marginPercent || 0) < 25 ? C.red : C.green, fontSize: 13 }}>
+                        {est.marginPercent ? `${est.marginPercent}%` : '—'}
+                        {(est.marginPercent || 0) < 25 && <span style={{ marginLeft: 4, color: C.red }}>!</span>}
+                      </td>
+                    )}
                     <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: C.green, fontSize: 13 }}>
                       {est.totalCost ? fmt(est.totalCost) : '—'}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                        <button onClick={(e) => { e.stopPropagation(); handleDuplicate(est); }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Duplicate">📋</button>
-                        <button onClick={(e) => { e.stopPropagation(); handleEdit(est); }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Edit">✏️</button>
-                        <button onClick={(e) => { e.stopPropagation(); handleDelete(est.id); }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Delete">🗑️</button>
+                        <button className="pressable" onClick={(e) => { e.stopPropagation(); handleDuplicate(est); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Duplicate"><span style={{ pointerEvents: 'none' }}>📋</span></button>
+                        <button className="pressable" onClick={(e) => { e.stopPropagation(); handleEdit(est); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Edit"><span style={{ pointerEvents: 'none' }}>✏️</span></button>
+                        <button className="pressable" onClick={(e) => { e.stopPropagation(); handleDelete(est.id); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Delete"><span style={{ pointerEvents: 'none' }}>🗑️</span></button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
               {filteredEstimates.length === 0 && (
-                <tr><td colSpan={9} style={{ ...tdStyle, textAlign: 'center', color: C.gray400, padding: 40 }}>
-                  {estimates.length === 0 ? 'No estimates yet. Click "+ New Estimate" to get started.' : 'No estimates match your filters.'}
+                <tr><td colSpan={canViewMargin ? 10 : 9} style={{ ...tdStyle, textAlign: 'center', padding: 0 }}>
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', padding: 48, textAlign: 'center'
+                  }}>
+                    <div style={{
+                      width: 64, height: 64, borderRadius: '50%', background: '#F5F5F7',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16
+                    }}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                    </div>
+                    <p style={{ fontSize: 16, fontWeight: 600, color: '#252842', marginBottom: 4 }}>
+                      {estimates.length === 0 ? 'No estimates yet' : 'No matching estimates'}
+                    </p>
+                    <p style={{ fontSize: 14, color: '#9CA3AF', marginBottom: 16 }}>
+                      {estimates.length === 0 ? 'Click "+ New Estimate" above to create your first estimate.' : 'Try adjusting your filters to find what you\'re looking for.'}
+                    </p>
+                  </div>
                 </td></tr>
               )}
             </tbody>
@@ -542,7 +638,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
   );
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', maxWidth: 1280, margin: '0 auto' }}>
       <div style={{
         padding: '16px 24px',
         borderBottom: `1px solid ${C.gray200}`,
@@ -556,6 +652,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
           {/* View toggle */}
           <div style={{ display: 'flex', border: `1px solid ${C.gray300}`, borderRadius: 6, overflow: 'hidden' }}>
             <button
+              className="pressable"
               onClick={() => setViewMode('kanban')}
               style={{
                 padding: '6px 12px', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
@@ -566,6 +663,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
               Board
             </button>
             <button
+              className="pressable"
               onClick={() => setViewMode('list')}
               style={{
                 padding: '6px 12px', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
@@ -578,6 +676,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
             </button>
           </div>
           <button
+            className="pressable"
             onClick={() => { resetForm(); setShowNewModal(true); }}
             style={{
               padding: '8px 16px',
@@ -590,7 +689,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
               cursor: 'pointer',
             }}
           >
-            + New Estimate
+            <span style={{ pointerEvents: 'none' }}>+ New Estimate</span>
           </button>
         </div>
       </div>
@@ -604,14 +703,80 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
             </div>
             <KanbanBoard
               estimates={filteredEstimates}
-              onStatusChange={onStatusChange}
+              onStatusChange={(id, newStatus) => {
+                const est = estimates.find(e => e.id === id);
+                if (est) {
+                  const updated = trackStatusChange(est, newStatus);
+                  onStatusChange(id, newStatus);
+                  onUpdateEstimate(updated);
+                }
+              }}
               onCardClick={onOpenEstimate}
               onEditClick={handleEdit}
               onDeleteClick={handleDelete}
               onDuplicate={handleDuplicate}
               onUpdateEstimate={onUpdateEstimate}
+              onWon={(est) => {
+                const updated = trackStatusChange(est, 'awarded');
+                onUpdateEstimate(updated);
+              }}
+              onLost={(est) => {
+                setLossTarget(est);
+                setShowLossDialog(true);
+              }}
+              onNoResponse={(est) => {
+                const updated = trackStatusChange(est, 'no_response');
+                onUpdateEstimate(updated);
+              }}
               team={team}
+              canViewMargin={canViewMargin}
+              currentUser={currentUser}
             />
+            <div style={{
+              padding: '20px',
+              backgroundColor: C.gray50,
+              display: 'flex',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}>
+              {TERMINAL_STATUSES.map(status => {
+                const items = filteredEstimates.filter(e => e.status === status);
+                const statusConfig = STATUS_CONFIG[status];
+                return (
+                  <div key={status} style={{
+                    flex: '1 1 auto',
+                    minWidth: 200,
+                    padding: 12,
+                    backgroundColor: C.white,
+                    borderRadius: 8,
+                    border: `1px solid ${C.gray200}`,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{
+                        width: 10, height: 10, borderRadius: '50%',
+                        backgroundColor: statusConfig.color,
+                      }} />
+                      <h4 style={{ fontSize: 13, fontWeight: 600, color: C.navy, margin: 0 }}>
+                        {statusConfig.label}
+                      </h4>
+                    </div>
+                    <p style={{ fontSize: 24, fontWeight: 700, color: statusConfig.color, margin: '8px 0 0 0' }}>
+                      {items.length}
+                    </p>
+                    {items.length > 0 && (
+                      <div style={{ fontSize: 11, color: C.gray500, marginTop: 8, maxHeight: 60, overflow: 'auto' }}>
+                        {items.slice(0, 3).map(item => (
+                          <div key={item.id} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {item.propertyName}
+                          </div>
+                        ))}
+                        {items.length > 3 && <div style={{ fontWeight: 600 }}>+{items.length - 3} more</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : (
           renderListView()
@@ -625,6 +790,73 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
       <Modal isOpen={showEditModal} title="Edit Estimate" onClose={() => { setShowEditModal(false); resetForm(); }} width={560}>
         {renderForm(handleEditSubmit, 'Save Changes')}
       </Modal>
+
+      <Modal isOpen={showLossDialog} title="Mark as Lost" onClose={() => { setShowLossDialog(false); setLossTarget(null); setLossReason(''); }} width={400}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {lossTarget && (
+            <>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: C.navy, display: 'block', marginBottom: 4 }}>
+                  Estimate: {lossTarget.propertyName}
+                </label>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: C.navy, display: 'block', marginBottom: 4 }}>
+                  Loss Reason
+                </label>
+                <select
+                  value={lossReason}
+                  onChange={(e) => setLossReason(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: `1px solid ${C.gray300}`,
+                    borderRadius: 8,
+                    fontSize: 14,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <option value="">Select a reason...</option>
+                  {LOSS_REASONS.map(reason => (
+                    <option key={reason} value={reason}>{reason}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button
+                  onClick={() => { setShowLossDialog(false); setLossTarget(null); setLossReason(''); }}
+                  style={{ padding: '10px 16px', backgroundColor: C.gray200, color: C.navy, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (lossTarget && lossReason) {
+                      const updated = trackStatusChange(lossTarget, 'lost');
+                      updated.lossReason = lossReason;
+                      onUpdateEstimate(updated);
+                      setShowLossDialog(false);
+                      setLossTarget(null);
+                      setLossReason('');
+                    }
+                  }}
+                  style={{ padding: '10px 16px', backgroundColor: C.red, color: C.white, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Mark as Lost
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog({ ...confirmDialog, open: false })}
+      />
     </div>
   );
 }

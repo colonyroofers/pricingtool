@@ -31,9 +31,16 @@ export const useAuth = () => {
 export const useFirestoreCollection = (collectionName, defaultData = []) => {
   const [data, setData] = useState(() => {
     // Load from localStorage cache immediately
-    const stored = localStorage.getItem(`pt_${collectionName}`);
+    let stored;
+    try {
+      stored = localStorage.getItem(`pt_${collectionName}`);
+    } catch (e) {
+      return defaultData;
+    }
     if (stored) {
-      try { return JSON.parse(stored); } catch(e) {}
+      try {
+        return JSON.parse(stored);
+      } catch (e) {}
     }
     return defaultData;
   });
@@ -128,4 +135,82 @@ export const useIsMobile = () => {
     return () => window.removeEventListener("resize", handle);
   }, []);
   return mobile;
+};
+
+// Offline queue hook
+export const useOfflineQueue = (queueKey = 'submission_queue') => {
+  const processQueue = useCallback(async (submitFn) => {
+    let queue;
+    try {
+      queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    } catch (e) {
+      queue = [];
+    }
+    if (queue.length === 0) return { success: 0, failed: 0 };
+
+    const remaining = [];
+    let successCount = 0;
+    for (const item of queue) {
+      try {
+        await submitFn(item.data);
+        successCount++;
+      } catch {
+        remaining.push(item);
+      }
+    }
+    localStorage.setItem(queueKey, JSON.stringify(remaining));
+    return { success: successCount, failed: remaining.length };
+  }, [queueKey]);
+
+  const addToQueue = useCallback((data) => {
+    let queue;
+    try {
+      queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    } catch (e) {
+      queue = [];
+    }
+    queue.push({ data, queuedAt: new Date().toISOString() });
+    localStorage.setItem(queueKey, JSON.stringify(queue));
+  }, [queueKey]);
+
+  const getQueueLength = useCallback(() => {
+    let queue;
+    try {
+      queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    } catch (e) {
+      queue = [];
+    }
+    return queue.length;
+  }, [queueKey]);
+
+  return { processQueue, addToQueue, getQueueLength };
+};
+
+// Status time tracking hook
+export const useStatusTimeTracking = () => {
+  const getTimeInStatus = useCallback((statusHistory = []) => {
+    if (statusHistory.length < 2) return {};
+    const times = {};
+    for (let i = 0; i < statusHistory.length - 1; i++) {
+      const current = statusHistory[i];
+      const next = statusHistory[i + 1];
+      const duration = new Date(next.timestamp) - new Date(current.timestamp);
+      const durationDays = duration / (1000 * 60 * 60 * 24);
+      times[current.status] = (times[current.status] || 0) + durationDays;
+    }
+    // Add time in current status
+    const last = statusHistory[statusHistory.length - 1];
+    const sinceLastChange = (Date.now() - new Date(last.timestamp)) / (1000 * 60 * 60 * 24);
+    times[last.status] = (times[last.status] || 0) + sinceLastChange;
+    return times;
+  }, []);
+
+  const getTotalTurnaround = useCallback((statusHistory = []) => {
+    if (statusHistory.length < 2) return null;
+    const first = new Date(statusHistory[0].timestamp);
+    const last = new Date(statusHistory[statusHistory.length - 1].timestamp);
+    return (last - first) / (1000 * 60 * 60 * 24);
+  }, []);
+
+  return { getTimeInStatus, getTotalTurnaround };
 };

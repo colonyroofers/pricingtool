@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut } from 'firebase/auth';
-import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut, signInWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, getDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -22,6 +22,23 @@ export const googleProvider = new GoogleAuthProvider();
 // Auth helpers
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const signOutUser = () => fbSignOut(auth);
+export const loginWithEmail = (email, password) => signInWithEmailAndPassword(auth, email, password);
+export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const logout = () => fbSignOut(auth);
+export const onAuthChange = (callback) => onAuthStateChanged(auth, callback);
+
+// Get user role from Firestore (custom claims backup)
+export const getUserRole = async (uid) => {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (userDoc.exists()) {
+      return userDoc.data().role || 'staff_estimator';
+    }
+    return 'staff_estimator';
+  } catch {
+    return 'staff_estimator';
+  }
+};
 
 // Firestore helpers
 export const getCollection = async (collectionName) => {

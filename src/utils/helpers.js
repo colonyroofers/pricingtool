@@ -130,19 +130,9 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
 
   const materialCost = lineItems.reduce((sum, li) => sum + (li.qty * li.price), 0);
 
-  // Labor — state-specific basis
-  // FL: ROUNDUP(pitchedArea_with_waste / 100, 0) * laborPerSquare
-  // GA: ROUNDUP(totalArea / 100, 0) * laborPerSquare
-  const { totalArea = 0, pitchedArea = 0, wastePercent = 12 } = building;
-  const waste = (wastePercent || 12) / 100;
-  let laborSquares;
-  if (stLabor.laborBasis === 'total') {
-    laborSquares = Math.ceil(totalArea / 100);
-  } else {
-    // 'pitched' — use pitched area with waste
-    const pitchedWithWaste = (pitchedArea || totalArea) * (1 + waste);
-    laborSquares = Math.ceil(pitchedWithWaste / 100);
-  }
+  // Labor — pitched area with NO waste for all states
+  const { totalArea = 0, pitchedArea = 0 } = building;
+  const laborSquares = Math.ceil((pitchedArea || totalArea) / 100);
   const laborCost = laborSquares * stLabor.laborPerSquare;
   const tearOffCost = laborSquares * stLabor.tearOffPerSquare;
   const warrantyCost = laborSquares * stLabor.warrantyPerSq;
@@ -630,4 +620,402 @@ export const downloadCSV = (data, filename) => {
 export const parseCSV = (text) => {
   const lines = text.split('\n');
   return lines.map(line => line.split(',').map(cell => cell.trim().replace(/^"|"$/g, '')));
+};
+
+// ==================== PDF GENERATION ====================
+
+/**
+ * Generate a professional estimate PDF with company branding, project details, scope, and pricing.
+ * Supports multi-tier pricing and custom line items.
+ * @param {Object} estimate - Estimate data
+ * @param {Array} buildings - Building data
+ * @param {Object} stateConfig - State configuration
+ * @param {Object} options - Optional parameters
+ * @param {Object} options.termsAndConditions - T&C text content and version
+ * @param {boolean} options.canViewMargin - Whether to include margin data (default: true)
+ */
+export const generateEstimatePDF = async (estimate, buildings, stateConfig, options = {}) => {
+  const { termsAndConditions, canViewMargin = true } = options;
+
+  try {
+    const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+    const pdfDoc = await PDFDocument.create();
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    const NAVY = rgb(0.145, 0.157, 0.259); // #252842
+    const RED = rgb(0.890, 0.024, 0.075);   // #E30613
+    const DARK = rgb(0.2, 0.2, 0.2);
+    const GRAY = rgb(0.4, 0.4, 0.4);
+    const LIGHT = rgb(0.88, 0.88, 0.88);
+
+    const PAGE_W = 612; // Letter width
+    const PAGE_H = 792; // Letter height
+    const M = 50; // Margin
+    const CW = PAGE_W - 2 * M; // Content width
+
+    const fmt = (n) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+    let y = PAGE_H - M;
+    let pageNum = 1;
+
+    const checkNewPage = (needed = 60) => {
+      if (y < M + needed) {
+        page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+        y = PAGE_H - M;
+        pageNum++;
+      }
+    };
+
+    const drawText = (text, x, yPos, { size = 10, bold = false, color = DARK } = {}) => {
+      const f = bold ? fontBold : font;
+      page.drawText(String(text || ''), { x, y: yPos, size, font: f, color });
+    };
+
+    const drawLine = (x1, y1, x2, y2, { thickness = 0.5, color = LIGHT } = {}) => {
+      page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness, color });
+    };
+
+    // ===== HEADER =====
+    drawText('Colony Roofers', M, y, { size: 24, bold: true, color: NAVY });
+    y -= 18;
+    drawText('Atlanta | Tampa | Dallas', M, y, { size: 10, color: GRAY });
+    y -= 8;
+    drawLine(M, y, PAGE_W - M, y, { thickness: 2, color: RED });
+    y -= 24;
+
+    // ===== PROJECT DETAILS =====
+    drawText('Project Details', M, y, { size: 13, bold: true, color: NAVY });
+    y -= 18;
+
+    const details = [
+      ['Property:', estimate.propertyName || 'N/A'],
+      ['Address:', `${estimate.address || ''} ${estimate.city || ''} ${estimate.state || ''} ${estimate.zip || ''}`.trim() || 'N/A'],
+      ['Contact:', estimate.contact || estimate.contactName || 'N/A'],
+      ['Phone:', estimate.phone || estimate.contactPhone || 'N/A'],
+      ['Estimator:', estimate.estimatorName || 'N/A'],
+      ['Date:', new Date().toLocaleDateString()],
+      ['Estimate ID:', estimate.id || 'N/A'],
+    ];
+
+    details.forEach(([label, value]) => {
+      drawText(label, M, y, { size: 9, bold: true, color: NAVY });
+      drawText(value, M + 80, y, { size: 9, color: DARK });
+      y -= 14;
+    });
+    y -= 10;
+
+    // ===== SCOPE OF WORK =====
+    if (estimate.type || estimate.jobType) {
+      checkNewPage(100);
+      drawText('Scope of Work', M, y, { size: 13, bold: true, color: NAVY });
+      y -= 16;
+
+      const scopeItems = getScopeItemsForJobType(estimate.type || estimate.jobType);
+      scopeItems.forEach((item) => {
+        checkNewPage();
+        drawText(`•  ${item}`, M + 8, y, { size: 9, color: DARK });
+        y -= 13;
+      });
+      y -= 10;
+    }
+
+    // ===== MATERIALS / PRICING =====
+    checkNewPage(80);
+    drawText('Pricing', M, y, { size: 13, bold: true, color: NAVY });
+    y -= 18;
+
+    const drawMaterialsSection = (materials = [], label) => {
+      if (label) {
+        drawText(label, M, y, { size: 11, bold: true, color: NAVY });
+        y -= 14;
+      }
+      // Table header
+      drawText('Item', M, y, { size: 8, bold: true, color: NAVY });
+      drawText('Qty', M + 220, y, { size: 8, bold: true, color: NAVY });
+      drawText('Unit Cost', M + 280, y, { size: 8, bold: true, color: NAVY });
+      drawText('Amount', M + 370, y, { size: 8, bold: true, color: NAVY });
+      if (canViewMargin) drawText('Margin', M + 440, y, { size: 8, bold: true, color: NAVY });
+      y -= 4;
+      drawLine(M, y, PAGE_W - M, y, { color: NAVY, thickness: 0.5 });
+      y -= 12;
+
+      (materials || []).forEach((item) => {
+        checkNewPage();
+        const lineCost = (item.qty || 0) * (item.price || 0);
+        const name = String(item.name || '').substring(0, 40);
+        drawText(name, M, y, { size: 8 });
+        drawText(String(item.qty || 0), M + 220, y, { size: 8 });
+        drawText(fmt(item.price || 0), M + 280, y, { size: 8 });
+        drawText(fmt(lineCost), M + 370, y, { size: 8 });
+        if (canViewMargin && item.marginPercent) {
+          drawText(`${item.marginPercent.toFixed(1)}%`, M + 440, y, { size: 8 });
+        }
+        y -= 12;
+      });
+      y -= 6;
+    };
+
+    const hasMultiTier = estimate.pricingTiers && estimate.tiersEnabled;
+    if (hasMultiTier) {
+      const tiers = estimate.pricingTiers || [];
+      tiers.forEach((tier) => {
+        checkNewPage(80);
+        drawMaterialsSection(tier.materials, `${tier.name || 'Option'}`);
+        drawText('Tier Total:', M + 280, y, { size: 10, bold: true, color: NAVY });
+        drawText(fmt(tier.total || 0), M + 370, y, { size: 10, bold: true, color: NAVY });
+        y -= 20;
+      });
+    } else {
+      drawMaterialsSection(estimate.materials);
+    }
+
+    // ===== CUSTOM LINE ITEMS =====
+    if (estimate.customLineItems && estimate.customLineItems.length > 0) {
+      checkNewPage(60);
+      drawText('Additional Line Items', M, y, { size: 13, bold: true, color: NAVY });
+      y -= 16;
+
+      estimate.customLineItems.forEach((item) => {
+        checkNewPage();
+        const lineCost = (item.quantity || 0) * (item.unitCost || 0);
+        drawText(item.description || '', M, y, { size: 8 });
+        drawText(String(item.quantity || 0), M + 220, y, { size: 8 });
+        drawText(fmt(item.unitCost || 0), M + 280, y, { size: 8 });
+        drawText(fmt(lineCost), M + 370, y, { size: 8 });
+        y -= 12;
+      });
+      y -= 10;
+    }
+
+    // ===== TOTALS =====
+    checkNewPage(40);
+    drawLine(M + 280, y, PAGE_W - M, y, { thickness: 1, color: NAVY });
+    y -= 14;
+    drawText('Total:', M + 280, y, { size: 12, bold: true, color: NAVY });
+    drawText(fmt(estimate.totalCost || estimate.total || 0), M + 370, y, { size: 12, bold: true, color: NAVY });
+    y -= 20;
+
+    // ===== TERMS & CONDITIONS =====
+    if (termsAndConditions && termsAndConditions.text) {
+      checkNewPage(80);
+      drawText('Terms and Conditions', M, y, { size: 13, bold: true, color: NAVY });
+      y -= 16;
+
+      // Split T&C into lines
+      const words = termsAndConditions.text.split(' ');
+      let line = '';
+      words.forEach((word) => {
+        const testLine = line ? `${line} ${word}` : word;
+        if (font.widthOfTextAtSize(testLine, 8) > CW) {
+          checkNewPage();
+          drawText(line, M, y, { size: 8, color: GRAY });
+          y -= 11;
+          line = word;
+        } else {
+          line = testLine;
+        }
+      });
+      if (line) {
+        checkNewPage();
+        drawText(line, M, y, { size: 8, color: GRAY });
+        y -= 11;
+      }
+
+      if (termsAndConditions.version) {
+        y -= 4;
+        drawText(`Terms version: ${termsAndConditions.version}`, M, y, { size: 7, color: GRAY });
+      }
+    }
+
+    // ===== FOOTER ON ALL PAGES =====
+    const pages = pdfDoc.getPages();
+    const totalPages = pages.length;
+    pages.forEach((p, i) => {
+      p.drawText('Colony Roofers — Atlanta | Tampa | Dallas', { x: M, y: 20, size: 8, font, color: GRAY });
+      p.drawText(`Page ${i + 1} of ${totalPages}`, { x: PAGE_W - M - 60, y: 20, size: 8, font, color: GRAY });
+    });
+
+    const pdfBytes = await pdfDoc.save();
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    throw error;
+  }
+};
+
+/**
+ * Helper: Get scope items based on job type
+ */
+function getScopeItemsForJobType(jobType) {
+  const scopes = {
+    shingle: [
+      'Remove existing roof covering and debris',
+      'Inspect and repair roof deck as needed',
+      'Install synthetic underlayment',
+      'Install ice and water shield in critical areas',
+      'Install architectural shingles with proper fastening',
+      'Install hip and ridge shingles',
+      'Install drip edge and flashing',
+      'Clean up and haul away all debris',
+      '10-year workmanship warranty',
+    ],
+    tpo: [
+      'Remove existing roof membrane and debris',
+      'Inspect and repair roof deck',
+      'Install underlayment and insulation as needed',
+      'Install TPO membrane with seam welding',
+      'Install flashing and perimeter trim',
+      'Perform final walkthrough and pressure test',
+      '5-year seam warranty',
+    ],
+    tile: [
+      'Remove existing roof covering',
+      'Inspect and repair/reinforce roof structure',
+      'Install underlayment and battens',
+      'Install tile with proper fastening and mortar',
+      'Install ridge and hip tiles',
+      'Install flashing and perimeter trim',
+      'Clean and seal tiles as needed',
+    ],
+  };
+  return scopes[jobType] || scopes.shingle;
+}
+
+// ==================== CSV EXPORT ====================
+
+/**
+ * Export estimate to CSV format
+ * @param {Object} estimate - Estimate data
+ * @param {Array} buildings - Building data
+ * @param {boolean} canViewMargin - Whether to include margin data
+ * @returns {Blob} CSV blob for download
+ */
+export const exportEstimateToCSV = (estimate, buildings, canViewMargin = true) => {
+  const rows = [];
+
+  // Header
+  rows.push(['Colony Roofers - Estimate Export']);
+  rows.push(['Estimate ID', estimate.id || 'N/A']);
+  rows.push(['Property', estimate.propertyName || 'N/A']);
+  rows.push(['Date', new Date().toLocaleDateString()]);
+  rows.push([]);
+
+  // Line items header
+  const headers = ['Item', 'Qty', 'Unit Cost', 'Total'];
+  if (canViewMargin) {
+    headers.push('Margin %', 'Margin Amount');
+  }
+  rows.push(headers);
+
+  // Materials
+  if (estimate.materials) {
+    estimate.materials.forEach((item) => {
+      const lineCost = (item.qty || 0) * (item.price || 0);
+      const row = [
+        item.name || '',
+        item.qty || 0,
+        item.price || 0,
+        lineCost,
+      ];
+      if (canViewMargin) {
+        const marginPct = item.marginPercent || 0;
+        const marginAmount = lineCost * (marginPct / 100);
+        row.push(marginPct.toFixed(2), marginAmount.toFixed(2));
+      }
+      rows.push(row);
+    });
+  }
+
+  rows.push([]);
+
+  // Custom line items
+  if (estimate.customLineItems && estimate.customLineItems.length > 0) {
+    rows.push(['Custom Line Items']);
+    estimate.customLineItems.forEach((item) => {
+      const lineCost = (item.quantity || 0) * (item.unitCost || 0);
+      rows.push([
+        item.description || '',
+        item.quantity || 0,
+        item.unitCost || 0,
+        lineCost,
+      ]);
+    });
+    rows.push([]);
+  }
+
+  // Summary
+  rows.push(['Summary']);
+  rows.push(['Subtotal', estimate.subtotal ? `$${estimate.subtotal.toFixed(2)}` : '$0.00']);
+  if (canViewMargin) {
+    rows.push(['Margin', estimate.margin ? `$${estimate.margin.toFixed(2)}` : '$0.00']);
+  }
+  rows.push(['Total', estimate.total ? `$${estimate.total.toFixed(2)}` : '$0.00']);
+
+  // Convert to CSV
+  const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+  return blob;
+};
+
+/**
+ * Export pipeline overview to CSV
+ * @param {Array} estimates - Array of estimates
+ * @param {boolean} canViewMargin - Whether to include margin data
+ * @returns {Blob} CSV blob for download
+ */
+export const exportPipelineToCSV = (estimates, canViewMargin = true) => {
+  const rows = [];
+
+  rows.push(['Colony Roofers - Pipeline Overview']);
+  rows.push(['Export Date', new Date().toLocaleDateString()]);
+  rows.push([]);
+
+  const headers = ['ID', 'Property', 'Address', 'Status', 'Type', 'Estimator', 'Total', 'Bid Due Date'];
+  if (canViewMargin) {
+    headers.push('Margin %', 'Margin $');
+  }
+  rows.push(headers);
+
+  estimates.forEach((est) => {
+    const row = [
+      est.id || '',
+      est.propertyName || '',
+      `${est.address || ''} ${est.city || ''} ${est.state || ''}`.trim(),
+      est.status || '',
+      est.jobType || '',
+      est.estimatorName || '',
+      est.total ? `$${est.total.toFixed(2)}` : '$0.00',
+      est.bidDueDate || '',
+    ];
+    if (canViewMargin) {
+      const marginPct = est.marginPercent || 0;
+      const marginAmount = est.total * (marginPct / 100);
+      row.push(marginPct.toFixed(2), `$${marginAmount.toFixed(2)}`);
+    }
+    rows.push(row);
+  });
+
+  const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+  return blob;
+};
+
+// ==================== DOWNLOAD HELPERS ====================
+
+/**
+ * Trigger download of a blob as a file
+ * @param {Blob} blob - Blob to download
+ * @param {string} filename - Filename for the download
+ */
+export const downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 };

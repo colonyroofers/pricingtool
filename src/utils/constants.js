@@ -1,10 +1,10 @@
 // Colors
 export const C = {
-  navy: "#1B2A4A",
-  navyLight: "#263B66",
-  navyDark: "#111D35",
-  red: "#E63946",
-  redDark: "#C5303C",
+  navy: "#252842",
+  navyLight: "#2f3355",
+  navyDark: "#1a1d33",
+  red: "#E30613",
+  redDark: "#c70511",
   white: "#FFFFFF",
   gray50: "#F8FAFC",
   gray100: "#F1F5F9",
@@ -23,6 +23,15 @@ export const C = {
   blue: "#3B82F6",
 };
 
+// CSS variable mapping
+export const CSS_VARS = {
+  '--colony-navy': '#252842',
+  '--colony-red': '#E30613',
+  '--colony-white': '#FFFFFF',
+  '--colony-gray-light': '#F5F5F7',
+  '--colony-gray-mid': '#6B7280',
+};
+
 // Markets
 export const MARKETS = ["ATL", "TPA", "DFW", "NSH"];
 export const MARKET_LABELS = { ATL: "Atlanta", TPA: "Tampa", DFW: "Dallas", NSH: "Nashville" };
@@ -34,20 +43,34 @@ export const STATES = [
 ];
 
 // Roles
-export const ROLE_PRESETS = {
-  admin: { label: "Admin", color: "#E63946" },
-  estimator: { label: "Estimator", color: "#3B82F6" },
-  reviewer: { label: "Reviewer", color: "#10B981" },
+export const ROLES = {
+  admin: { label: 'Admin', color: '#E30613', permissions: ['view_all','edit_all','assign','review','approve','view_margin','edit_settings','export_all','manage_team'] },
+  lead_estimator: { label: 'Lead Estimator', color: '#252842', permissions: ['view_all','edit_all','assign','review','approve','view_margin','export_all'] },
+  staff_estimator: { label: 'Staff Estimator', color: '#3B82F6', permissions: ['view_all','edit_assigned','submit_for_review','export_basic'] },
 };
+export const MARGIN_VISIBLE_ROLES = ['admin', 'lead_estimator'];
+// Backward compat alias
+export const ROLE_PRESETS = ROLES;
 
 // Estimate statuses
 export const ESTIMATE_STATUSES = [
-  { key: "unassigned", label: "Unassigned", color: C.red, bg: C.redBg },
-  { key: "assigned", label: "Assigned", color: C.blue, bg: C.blueBg },
-  { key: "in_progress", label: "In Progress", color: C.yellow, bg: C.yellowBg },
-  { key: "submitted", label: "Submitted for Review", color: "#8B5CF6", bg: "#EDE9FE" },
-  { key: "approved", label: "Approved", color: C.green, bg: C.greenBg },
+  'unassigned','assigned','waiting_on_measurements','pricing','ready_for_review','rejected','approved','proposal_sent','awarded','lost','no_response'
 ];
+export const STATUS_CONFIG = {
+  unassigned: { label: 'Unassigned', color: '#E30613', bg: '#FEE2E5', description: 'No estimator assigned yet' },
+  assigned: { label: 'Assigned', color: '#3B82F6', bg: '#DBEAFE', description: 'Estimator assigned, not yet started' },
+  waiting_on_measurements: { label: 'Waiting on Measurements', color: '#8B5CF6', bg: '#EDE9FE', description: 'Waiting for RoofR/Beam AI data' },
+  pricing: { label: 'Pricing', color: '#F59E0B', bg: '#FEF3C7', description: 'Actively pricing the job' },
+  ready_for_review: { label: 'Ready for Review', color: '#6366F1', bg: '#E0E7FF', description: 'Submitted for lead estimator approval' },
+  rejected: { label: 'Rejected', color: '#DC2626', bg: '#FEE2E2', description: 'Sent back with notes for revision' },
+  approved: { label: 'Approved', color: '#10B981', bg: '#D1FAE5', description: 'Lead estimator approved' },
+  proposal_sent: { label: 'Proposal Sent', color: '#0EA5E9', bg: '#E0F2FE', description: 'Proposal delivered to client' },
+  awarded: { label: 'Awarded', color: '#059669', bg: '#A7F3D0', description: 'Client signed contract' },
+  lost: { label: 'Lost', color: '#6B7280', bg: '#F3F4F6', description: 'Proposal not accepted' },
+  no_response: { label: 'No Response', color: '#9CA3AF', bg: '#F9FAFB', description: 'Client never responded' },
+};
+export const KANBAN_COLUMNS = ['unassigned','assigned','waiting_on_measurements','pricing','ready_for_review','approved','proposal_sent'];
+export const TERMINAL_STATUSES = ['awarded','lost','no_response'];
 
 // Estimate types
 export const ESTIMATE_TYPES = [
@@ -55,6 +78,51 @@ export const ESTIMATE_TYPES = [
   { key: "tile", label: "Tile", icon: "🧱" },
   { key: "tpo", label: "TPO", icon: "🏢" },
 ];
+
+// App version and data version
+export const APP_VERSION = '2.0.0';
+export const DATA_VERSION = 2;
+
+// Default margin thresholds by state
+export const DEFAULT_MARGIN_THRESHOLDS = { FL: 25, GA: 25, TX: 25, TN: 25 };
+
+// Job types
+export const JOB_TYPES = [
+  { value: 'shingle', label: 'Shingle', category: 'replacement' },
+  { value: 'tile', label: 'Tile', category: 'replacement' },
+  { value: 'tpo', label: 'TPO / Flat Roof', category: 'commercial' },
+  { value: 'metal', label: 'Metal', category: 'both' },
+  { value: 'new_construction', label: 'New Construction', category: 'new_construction' },
+];
+
+// Deadline types
+export const DEADLINE_TYPES = {
+  hard: { label: 'Hard Deadline', color: '#DC2626' },
+  flexible: { label: 'Flexible', color: '#F59E0B' },
+  none: { label: 'No Deadline', color: '#6B7280' },
+};
+
+// Loss reasons
+export const LOSS_REASONS = [
+  'Price too high','Went with competitor','Project cancelled','Client chose to DIY / defer','Scope changed','Financing fell through','Other',
+];
+
+// Notification events
+export const NOTIFICATION_EVENTS = {
+  job_assigned: { label: 'Job Assigned', audience: 'assignee' },
+  estimate_rejected: { label: 'Estimate Rejected', audience: 'assignee' },
+  bid_due_24hr: { label: 'Bid Due in 24hrs', audience: 'assignee' },
+  bid_due_today: { label: 'Bid Due Today', audience: 'assignee' },
+  new_job_in_queue: { label: 'New Job in Queue', audience: 'lead_estimator' },
+  estimate_submitted: { label: 'Estimate Submitted for Review', audience: 'lead_estimator' },
+};
+
+// Pricing tiers
+export const PRICING_TIERS = {
+  good: { label: 'Good', description: 'Standard materials and installation' },
+  better: { label: 'Better', description: 'Upgraded materials with enhanced warranty' },
+  best: { label: 'Best', description: 'Premium materials with maximum warranty coverage' },
+};
 
 // Default shingle materials — state-specific pricing from FL & GA spreadsheets
 // TX and TN default to FL pricing until real spreadsheets are provided
@@ -80,9 +148,9 @@ export const DEFAULT_SHINGLE_MATERIALS = [
 // TX defaults to FL, TN defaults to GA
 export const STATE_LABOR = {
   FL: { laborPerSquare: 120, forkliftCost: 6564, dumpsterCost: 19840, permitCost: 3440, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 50, laborBasis: 'pitched' },
-  GA: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'total' },
-  TX: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'total' },
-  TN: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'total' },
+  GA: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'pitched' },
+  TX: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'pitched' },
+  TN: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'pitched' },
 };
 
 // State-specific financials (from FL & GA spreadsheets)

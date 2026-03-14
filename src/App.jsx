@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { C, NAV_ITEMS, ESTIMATE_STATUSES, ROLE_PRESETS } from './utils/constants';
+import React, { useState, useEffect, useMemo } from 'react';
+import { C, NAV_ITEMS, ESTIMATE_STATUSES, ROLE_PRESETS, APP_VERSION, ROLES, MARGIN_VISIBLE_ROLES } from './utils/constants';
 import { useAuth, useFirestoreCollection, useIsMobile } from './hooks/index';
+import { ToastProvider } from './components/Toast';
+import OfflineBanner from './components/OfflineBanner';
 import LoginScreen from './components/LoginScreen';
 import Spinner from './components/Spinner';
 import DashboardModule from './modules/DashboardModule';
@@ -9,13 +11,15 @@ import ProductCatalogModule from './modules/ProductCatalogModule';
 import VendorCatalogModule from './modules/VendorCatalogModule';
 import TeamModule from './modules/TeamModule';
 import SettingsModule from './modules/SettingsModule';
+import AnalyticsDashboardModule from './modules/AnalyticsDashboardModule';
+import AIAssistant from './components/AIAssistant';
 
 // Default team
 const DEFAULT_TEAM = [
   { id: '1', name: 'Zach Reece', email: 'zach@colonyroofers.com', role: 'admin', active: true },
-  { id: '2', name: 'Joseph', email: 'joseph@colonyroofers.com', role: 'estimator', active: true },
-  { id: '3', name: 'J. Garside', email: 'jgarside@colonyroofers.com', role: 'estimator', active: true },
-  { id: '4', name: 'Brayleigh', email: 'brayleigh@colonyroofers.com', role: 'reviewer', active: true },
+  { id: '2', name: 'Joseph', email: 'joseph@colonyroofers.com', role: 'lead_estimator', active: true },
+  { id: '3', name: 'J. Garside', email: 'jgarside@colonyroofers.com', role: 'staff_estimator', active: true },
+  { id: '4', name: 'Brayleigh', email: 'brayleigh@colonyroofers.com', role: 'staff_estimator', active: true },
 ];
 
 export default function App() {
@@ -70,6 +74,19 @@ export default function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Warn about unsaved changes
+  useEffect(() => {
+    const handler = (e) => {
+      // Only warn if there's an active estimate being edited
+      if (activeEstimate) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [activeEstimate]);
 
   const isAuthComplete = demoMode || loggedIn || user;
 
@@ -131,6 +148,7 @@ export default function App() {
             onDuplicate={handleDuplicateEstimate}
             team={team}
             currentUser={currentUser}
+            canViewMargin={canViewMargin}
           />
         );
       case 'estimates':
@@ -139,6 +157,7 @@ export default function App() {
             estimate={activeEstimate}
             onSave={handleSaveEstimate}
             onClose={handleCloseEstimate}
+            canViewMargin={canViewMargin}
           />
         );
       case 'catalog':
@@ -149,6 +168,8 @@ export default function App() {
         return <TeamModule team={team} setTeam={setTeam} />;
       case 'settings':
         return <SettingsModule />;
+      case 'analytics':
+        return <AnalyticsDashboardModule estimates={estimates} team={team} currentUser={currentUser} canViewMargin={canViewMargin} />;
       default:
         return null;
     }
@@ -177,7 +198,7 @@ export default function App() {
           <div style={{
             width: 48,
             height: 48,
-            backgroundColor: C.red,
+            backgroundColor: '#E30613',
             borderRadius: 8,
             display: 'flex',
             alignItems: 'center',
@@ -265,7 +286,7 @@ export default function App() {
             style={{
               width: '100%',
               padding: '12px',
-              backgroundColor: C.red,
+              backgroundColor: '#E30613',
               color: C.white,
               border: 'none',
               borderRadius: 6,
@@ -275,8 +296,8 @@ export default function App() {
               marginBottom: 12,
               transition: 'background-color 0.2s',
             }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.redDark}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = C.red}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#c70511'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#E30613'}
           >
             Sign In
           </button>
@@ -307,29 +328,38 @@ export default function App() {
 
   const navItem = NAV_ITEMS.find(n => n.key === activeNav);
 
+  // Role-based margin visibility
+  const canViewMargin = useMemo(() => MARGIN_VISIBLE_ROLES.includes(currentUser.role), [currentUser.role]);
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      width: '100%',
-      height: '100vh',
-      backgroundColor: C.gray50,
-    }}>
-      {/* Offline/Online Banner */}
-      {showOnlineNotice && (
-        <div style={{
-          backgroundColor: isOnline ? C.green : C.yellow,
-          color: C.white,
-          padding: '12px 24px',
-          fontSize: 14,
-          fontWeight: 500,
-          textAlign: 'center',
-          animation: 'slideDown 0.3s ease-out',
-          zIndex: 200,
-        }}>
-          {isOnline ? 'Back online. Changes will sync.' : 'You are offline. Changes will sync when connection is restored.'}
-        </div>
-      )}
+    <ToastProvider>
+      <div
+        className="app-root"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: '100%',
+          height: '100vh',
+          backgroundColor: C.gray50,
+        }}
+      >
+        <OfflineBanner isOnline={isOnline} showOnlineNotice={showOnlineNotice} />
+
+        {/* Offline/Online Banner */}
+        {showOnlineNotice && (
+          <div style={{
+            backgroundColor: isOnline ? C.green : C.yellow,
+            color: C.white,
+            padding: '12px 24px',
+            fontSize: 14,
+            fontWeight: 500,
+            textAlign: 'center',
+            animation: 'slideDown 0.3s ease-out',
+            zIndex: 200,
+          }}>
+            {isOnline ? 'Back online. Changes will sync.' : 'You are offline. Changes will sync when connection is restored.'}
+          </div>
+        )}
 
       <div style={{
         display: 'flex',
@@ -363,7 +393,7 @@ export default function App() {
             style={{
               width: 32,
               height: 32,
-              backgroundColor: C.red,
+              backgroundColor: '#E30613',
               borderRadius: 6,
               display: 'flex',
               alignItems: 'center',
@@ -409,6 +439,7 @@ export default function App() {
           {NAV_ITEMS.map(item => (
             <button
               key={item.key}
+              className="pressable"
               onClick={() => {
                 if (item.key === 'estimates' && !activeEstimate) {
                   setActiveNav('estimates');
@@ -422,7 +453,7 @@ export default function App() {
                 padding: '12px 12px',
                 backgroundColor: activeNav === item.key ? C.navyLight : 'transparent',
                 border: 'none',
-                borderLeft: activeNav === item.key ? `3px solid ${C.red}` : '3px solid transparent',
+                borderLeft: activeNav === item.key ? `3px solid #E30613` : '3px solid transparent',
                 color: C.white,
                 cursor: 'pointer',
                 display: 'flex',
@@ -443,12 +474,48 @@ export default function App() {
                 }
               }}
             >
-              <span style={{ fontSize: 16 }}>{item.icon}</span>
+              <span style={{ fontSize: 16, pointerEvents: 'none' }}>{item.icon}</span>
               {!sidebarCollapsed && (
-                <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>
+                <span style={{ whiteSpace: 'nowrap', pointerEvents: 'none' }}>{item.label}</span>
               )}
             </button>
           ))}
+
+          {/* Analytics Item */}
+          <button
+            className="pressable"
+            onClick={() => setActiveNav('analytics')}
+            style={{
+              width: '100%',
+              padding: '12px 12px',
+              backgroundColor: activeNav === 'analytics' ? C.navyLight : 'transparent',
+              border: 'none',
+              borderLeft: activeNav === 'analytics' ? `3px solid #E30613` : '3px solid transparent',
+              color: C.white,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              fontSize: 13,
+              fontWeight: 500,
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => {
+              if (activeNav !== 'analytics') {
+                e.currentTarget.style.backgroundColor = C.navyLight;
+              }
+            }}
+            onMouseOut={(e) => {
+              if (activeNav !== 'analytics') {
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }
+            }}
+          >
+            <span style={{ fontSize: 16, pointerEvents: 'none' }}>📊</span>
+            {!sidebarCollapsed && (
+              <span style={{ whiteSpace: 'nowrap', pointerEvents: 'none' }}>Analytics</span>
+            )}
+          </button>
         </nav>
 
         {/* Sidebar Footer */}
@@ -551,6 +618,7 @@ export default function App() {
             gap: 12,
           }}>
             <select
+              className="pressable"
               value={currentUser.name}
               onChange={(e) => {
                 const member = team.find(t => t.name === e.target.value);
@@ -611,6 +679,18 @@ export default function App() {
         >
           {renderModule()}
         </div>
+
+        {/* Footer */}
+        <footer style={{
+          textAlign: 'center',
+          fontSize: 11,
+          color: '#9CA3AF',
+          padding: '16px 0',
+          borderTop: '1px solid #E2E8F0',
+          marginTop: 'auto',
+        }}>
+          Colony Roofers — Atlanta | Tampa | Dallas • v{APP_VERSION}
+        </footer>
       </div>
       </div>
 
@@ -627,5 +707,12 @@ export default function App() {
         }
       `}</style>
     </div>
+
+      <AIAssistant
+        currentModule={activeNav}
+        currentEstimate={activeEstimate ? estimates.find(e => e.id === activeEstimate) : null}
+        currentUser={currentUser}
+      />
+    </ToastProvider>
   );
 }

@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: Get user role from users collection
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    // Helper: Check if user has specific role
+    function hasRole(role) {
+      return isAuth() && getUserRole() == role;
+    }
+
+    // Helper: Check if user is admin or lead estimator
+    function isLeadOrAdmin() {
+      return isAuth() && (getUserRole() == 'admin' || getUserRole() == 'lead_estimator');
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && (request.auth.uid == userId || hasRole('admin'));
+    }
+
+    // Estimates collection
+    match /estimates/{estimateId} {
+      // All authenticated users can read estimates
+      allow read: if isAuth();
+
+      // Admin and lead estimator can create/update/delete any estimate
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isLeadOrAdmin();
+    }
+
+    // Jobs collection (shared across modules)
+    match /jobs/{jobId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isLeadOrAdmin();
+    }
+
+    // Products/catalog collection
+    match /products/{productId} {
+      allow read: if isAuth();
+      allow write: if isLeadOrAdmin();
+    }
+
+    // Vendors collection
+    match /vendors/{vendorId} {
+      allow read: if isAuth();
+      allow write: if isLeadOrAdmin();
+    }
+
+    // Team collection
+    match /team/{memberId} {
+      allow read: if isAuth();
+      allow write: if hasRole('admin');
+    }
+
+    // Settings collection (global app settings)
+    match /settings/{settingId} {
+      allow read: if isAuth();
+      allow write: if isLeadOrAdmin();
+    }
+
+    // Proposals collection
+    match /proposals/{proposalId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isLeadOrAdmin();
+      allow delete: if isLeadOrAdmin();
+    }
+  }
+}

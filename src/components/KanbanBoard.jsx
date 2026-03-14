@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { C, ESTIMATE_STATUSES, ESTIMATE_TYPES, fmt } from '../utils/constants';
+import { C, KANBAN_COLUMNS, ESTIMATE_TYPES, fmt, STATUS_CONFIG } from '../utils/constants';
 import Badge from './Badge';
 
-export default function KanbanBoard({ estimates, onStatusChange, onCardClick, onEditClick, onDeleteClick, onUpdateEstimate, onDuplicate, team = [] }) {
+export default function KanbanBoard({ estimates, onStatusChange, onCardClick, onEditClick, onDeleteClick, onUpdateEstimate, onDuplicate, onWon, onLost, onNoResponse, team = [], canViewMargin = false, currentUser = {} }) {
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
 
@@ -69,12 +69,13 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
       backgroundColor: C.gray50,
       minHeight: '100%',
     }}>
-      {ESTIMATE_STATUSES.map(status => {
-        const items = estimates.filter(e => e.status === status.key);
-        const isOver = dragOverCol === status.key;
+      {KANBAN_COLUMNS.map(statusKey => {
+        const statusConfig = STATUS_CONFIG[statusKey];
+        const items = estimates.filter(e => e.status === statusKey);
+        const isOver = dragOverCol === statusKey;
         return (
           <div
-            key={status.key}
+            key={statusKey}
             style={{
               flex: '0 0 280px',
               display: 'flex',
@@ -90,31 +91,31 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{
                   width: 10, height: 10, borderRadius: '50%',
-                  backgroundColor: status.color,
+                  backgroundColor: statusConfig.color,
                 }} />
                 <h3 style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>
-                  {status.label}
+                  {statusConfig.label}
                 </h3>
               </div>
               <span style={{
-                fontSize: 11, fontWeight: 700, color: status.color,
-                backgroundColor: status.bg, padding: '2px 8px', borderRadius: 10,
+                fontSize: 11, fontWeight: 700, color: statusConfig.color,
+                backgroundColor: statusConfig.bg, padding: '2px 8px', borderRadius: 10,
               }}>
                 {items.length}
               </span>
             </div>
 
             <div
-              onDragOver={(e) => handleDragOver(e, status.key)}
+              onDragOver={(e) => handleDragOver(e, statusKey)}
               onDragLeave={handleDragLeave}
-              onDrop={(e) => handleDrop(e, status.key)}
+              onDrop={(e) => handleDrop(e, statusKey)}
               style={{
                 flex: 1,
-                backgroundColor: isOver ? status.bg : C.white,
+                backgroundColor: isOver ? statusConfig.bg : C.white,
                 borderRadius: 8,
                 padding: 10,
                 minHeight: 400,
-                border: `2px dashed ${isOver ? status.color : C.gray200}`,
+                border: `2px dashed ${isOver ? statusConfig.color : C.gray200}`,
                 transition: 'all 0.2s',
               }}
             >
@@ -129,6 +130,7 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                 return (
                   <div
                     key={estimate.id}
+                    className="pressable"
                     draggable
                     onDragStart={(e) => handleDragStart(e, estimate)}
                     style={{
@@ -144,19 +146,19 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                   >
                     <div
                       onClick={() => onCardClick(estimate)}
-                      style={{ cursor: 'pointer' }}
+                      style={{ cursor: 'pointer', pointerEvents: 'none' }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                        <h4 style={{ fontSize: 13, fontWeight: 600, color: C.navy, margin: 0, flex: 1 }}>
+                        <h4 style={{ fontSize: 13, fontWeight: 600, color: C.navy, margin: 0, flex: 1, pointerEvents: 'none' }}>
                           {estimate.propertyName}
                         </h4>
-                        <span style={{ fontSize: 14 }}>{typeInfo.icon}</span>
+                        <span style={{ fontSize: 14, pointerEvents: 'none' }}>{typeInfo.icon}</span>
                       </div>
-                      <p style={{ fontSize: 11, color: C.gray500, marginBottom: 4 }}>
+                      <p style={{ fontSize: 11, color: C.gray500, marginBottom: 4, pointerEvents: 'none' }}>
                         {estimate.address}{estimate.city ? `, ${estimate.city}` : ''} {estimate.state}
                       </p>
                       {estimate.totalCost && (
-                        <p style={{ fontSize: 12, fontWeight: 600, color: C.green, marginBottom: 4 }}>
+                        <p style={{ fontSize: 12, fontWeight: 600, color: C.green, marginBottom: 4, pointerEvents: 'none' }}>
                           {fmt(estimate.totalCost)}
                         </p>
                       )}
@@ -165,12 +167,41 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                           display: 'inline-flex', alignItems: 'center', gap: 4,
                           fontSize: 11, fontWeight: 600, color: due.color,
                           backgroundColor: due.bg, padding: '2px 8px', borderRadius: 4,
-                          marginBottom: 4,
+                          marginBottom: 4, pointerEvents: 'none',
                         }}>
                           📅 Due {due.label}
                           {due.diff < 0 && ' (overdue)'}
                           {due.diff === 0 && ' (today)'}
                           {due.diff === 1 && ' (tomorrow)'}
+                        </div>
+                      )}
+                      {estimate.deadlineType === 'hard' && (
+                        <div style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4,
+                          fontSize: 11, fontWeight: 600, color: '#DC2626',
+                          backgroundColor: '#FEE2E2', padding: '2px 8px', borderRadius: 4,
+                          marginBottom: 4, pointerEvents: 'none',
+                        }}>
+                          🔴 Hard Deadline
+                        </div>
+                      )}
+                      {estimate.deadlineType === 'flexible' && (
+                        <div style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 4,
+                          fontSize: 11, fontWeight: 600, color: '#F59E0B',
+                          backgroundColor: '#FEF3C7', padding: '2px 8px', borderRadius: 4,
+                          marginBottom: 4, pointerEvents: 'none',
+                        }}>
+                          🟡 Flexible
+                        </div>
+                      )}
+                      {canViewMargin && estimate.marginPercent < 25 && (
+                        <div style={{
+                          display: 'block',
+                          fontSize: 11, fontWeight: 600, color: C.red,
+                          marginTop: 4, pointerEvents: 'none',
+                        }}>
+                          ⚠ Low margin ({estimate.marginPercent}%)
                         </div>
                       )}
                     </div>
@@ -200,12 +231,72 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                       </select>
                     </div>
 
+                    {estimate.status === 'proposal_sent' && (
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                        <button
+                          className="pressable"
+                          onClick={(e) => { e.stopPropagation(); onWon && onWon(estimate); }}
+                          style={{
+                            flex: '1 1 auto',
+                            padding: '6px 8px',
+                            backgroundColor: '#10B981',
+                            color: C.white,
+                            border: 'none',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                          title="Mark as Won"
+                        >
+                          <span style={{ pointerEvents: 'none' }}>Won</span>
+                        </button>
+                        <button
+                          className="pressable"
+                          onClick={(e) => { e.stopPropagation(); onLost && onLost(estimate); }}
+                          style={{
+                            flex: '1 1 auto',
+                            padding: '6px 8px',
+                            backgroundColor: '#6B7280',
+                            color: C.white,
+                            border: 'none',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                          title="Mark as Lost"
+                        >
+                          <span style={{ pointerEvents: 'none' }}>Lost</span>
+                        </button>
+                        <button
+                          className="pressable"
+                          onClick={(e) => { e.stopPropagation(); onNoResponse && onNoResponse(estimate); }}
+                          style={{
+                            flex: '1 1 auto',
+                            padding: '6px 8px',
+                            backgroundColor: '#9CA3AF',
+                            color: C.white,
+                            border: 'none',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                          title="No Response"
+                        >
+                          <span style={{ pointerEvents: 'none' }}>No Resp</span>
+                        </button>
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <Badge label={typeInfo.label} color={C.blue} bg={C.blueBg} />
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button
+                          className="pressable"
                           onClick={(e) => { e.stopPropagation(); onDuplicate && onDuplicate(estimate); }}
                           style={{
                             background: 'none', border: 'none', cursor: 'pointer',
@@ -213,9 +304,10 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                           }}
                           title="Duplicate"
                         >
-                          📋
+                          <span style={{ pointerEvents: 'none' }}>📋</span>
                         </button>
                         <button
+                          className="pressable"
                           onClick={(e) => { e.stopPropagation(); onEditClick(estimate); }}
                           style={{
                             background: 'none', border: 'none', cursor: 'pointer',
@@ -223,9 +315,10 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                           }}
                           title="Edit"
                         >
-                          ✏️
+                          <span style={{ pointerEvents: 'none' }}>✏️</span>
                         </button>
                         <button
+                          className="pressable"
                           onClick={(e) => { e.stopPropagation(); onDeleteClick(estimate.id); }}
                           style={{
                             background: 'none', border: 'none', cursor: 'pointer',
@@ -233,7 +326,7 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                           }}
                           title="Delete"
                         >
-                          🗑️
+                          <span style={{ pointerEvents: 'none' }}>🗑️</span>
                         </button>
                       </div>
                     </div>

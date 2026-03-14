@@ -4,10 +4,19 @@ import { C, EMPTY_BUILDING, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FI
   BUILDING_CODE_WARNINGS, SCOPE_ITEMS, SCOPE_ITEMS_SHINGLE, SCOPE_ITEMS_TILE, SCOPE_ITEMS_TPO, UNIT_COSTS_TEXT, EXCLUSIONS, TPO_DEFAULT_LABOR,
   COMPANY_INFO, CONTRACT_TERMS,
   fmt, fmtInt, generateId } from '../utils/constants';
+import { STATUS_CONFIG, PRICING_TIERS, MARGIN_VISIBLE_ROLES, APP_VERSION } from '../utils/constants';
 import { calculateShingleMaterials, calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
   calculateWastePercent, parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
 import { uploadFile, deleteFile } from '../utils/firebase';
 import DataTable from '../components/DataTable';
+import ConfirmDialog from '../components/ConfirmDialog';
+import SuccessScreen from '../components/SuccessScreen';
+import CommentThread from '../components/CommentThread';
+import RevisionHistory from '../components/RevisionHistory';
+import AuditTrail from '../components/AuditTrail';
+import CollaborationIndicator from '../components/CollaborationIndicator';
+import CustomLineItems from '../components/CustomLineItems';
+import { useToast } from '../components/Toast';
 
 const DEMO_BUILDINGS = [
   { siteplanNum: "1", roofrNum: "1", phase: 1, totalArea: 12997, pitchedArea: 12997, predominantPitch: "4/12", wastePercent: 12, eaves: 494.4, valleys: 421.3, hips: 254.0, ridges: 265.4, rakes: 385.8, wallFlashing: 203.3, stepFlashing: 86.5, pipes: 6, dryerVents: 3 },
@@ -17,7 +26,7 @@ const DEMO_BUILDINGS = [
   { siteplanNum: "5", roofrNum: "5", phase: 1, totalArea: 14695, pitchedArea: 14695, predominantPitch: "4/12", wastePercent: 14, eaves: 545.3, valleys: 590.5, hips: 407.7, ridges: 298.3, rakes: 410.6, wallFlashing: 201.7, stepFlashing: 89.3, pipes: 7, dryerVents: 3 },
 ];
 
-export default function EstimateWizard({ estimate, onSave, onClose }) {
+export default function EstimateWizard({ estimate, onSave, onClose, currentUser, canViewMargin }) {
   const [step, setStep] = useState(1);
   const [buildings, setBuildings] = useState(estimate?.buildings?.length > 0 ? estimate.buildings : []);
   const [tpoMaterials, setTpoMaterials] = useState(estimate?.tpoMaterials || []);
@@ -30,6 +39,13 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   const [uploadedFiles, setUploadedFiles] = useState(estimate?.uploadedFiles || []);
   const [dragging, setDragging] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pricingTiers, setPricingTiers] = useState({ good: null, better: null, best: null });
+  const [activeTier, setActiveTier] = useState('good');
+  const [tiersEnabled, setTiersEnabled] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [validationErrors, setValidationErrors] = useState({});
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
@@ -50,7 +66,54 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   // Get or create estimate ID for file storage path
   const estimateId = estimate?.id || useRef(generateId()).current;
 
+  // Helper to update estimate and track changes
+  const updateEstimate = (updates) => {
+    const updatedEst = { ...estimate, ...updates };
+    onSave?.(updatedEst);
+    setHasUnsavedChanges(true);
+  };
+
+  // Audit trail logging helper
+  const addAuditEntry = (action, detail = '') => {
+    const entry = {
+      id: generateId(),
+      action,
+      detail,
+      userName: currentUser?.name || 'Unknown',
+      userRole: currentUser?.role || 'staff_estimator',
+      timestamp: new Date().toISOString(),
+    };
+    const trail = [...(estimate?.auditTrail || []), entry];
+    updateEstimate({ auditTrail: trail });
+  };
+
   // Helper to process a File object and handle merge/append logic
+  // Compress image files before processing
+  const compressImage = (file, maxWidth = 1200, quality = 0.7) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const processFile = async (file) => {
     if (!file) return;
 
@@ -58,11 +121,23 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     setUploadStatus(`Uploading & parsing ${file.name}...`);
 
     try {
+      // Compress images before upload
+      let fileToUpload = file;
+      if (file.type.startsWith('image/')) {
+        try {
+          const compressedDataUrl = await compressImage(file);
+          const blob = await fetch(compressedDataUrl).then(r => r.blob());
+          fileToUpload = new File([blob], file.name, { type: 'image/jpeg' });
+        } catch (compressErr) {
+          console.warn('Image compression failed, uploading original:', compressErr);
+        }
+      }
+
       // Upload to Firebase Storage
       const storagePath = `estimates/${estimateId}/${file.name}`;
       let downloadURL = '';
       try {
-        downloadURL = await uploadFile(storagePath, file);
+        downloadURL = await uploadFile(storagePath, fileToUpload);
       } catch (storageErr) {
         console.warn('Firebase Storage upload failed, continuing with parse only:', storageErr);
       }
@@ -87,22 +162,32 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
         if (result.buildings.length > 0) {
           if (buildings.length > 0) {
             // Ask user whether to replace or append
-            if (window.confirm('Buildings already loaded. Click OK to replace all, or Cancel to add new buildings to existing ones.')) {
-              setBuildings(result.buildings);
-              setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
-            } else {
-              // Append and renumber
-              const newBuildings = result.buildings.map((b, idx) => ({
-                ...b,
-                siteplanNum: String(buildings.length + idx + 1),
-                roofrNum: String(buildings.length + idx + 1),
-              }));
-              setBuildings([...buildings, ...newBuildings]);
-              setUploadStatus(`Added ${result.buildings.length} buildings from ${result.pageCount} pages (renumbered). File uploaded. Review measurements below.`);
-            }
+            setConfirmDialog({
+              title: 'Buildings Already Loaded',
+              message: 'Buildings already loaded. Click OK to replace all, or Cancel to add new buildings to existing ones.',
+              onConfirm: () => {
+                setBuildings(result.buildings);
+                setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
+                addAuditEntry('buildings_replaced', `Replaced buildings with ${result.buildings.length} from ${file.name}`);
+                setConfirmDialog(null);
+              },
+              onCancel: () => {
+                // Append and renumber
+                const newBuildings = result.buildings.map((b, idx) => ({
+                  ...b,
+                  siteplanNum: String(buildings.length + idx + 1),
+                  roofrNum: String(buildings.length + idx + 1),
+                }));
+                setBuildings([...buildings, ...newBuildings]);
+                setUploadStatus(`Added ${result.buildings.length} buildings from ${result.pageCount} pages (renumbered). File uploaded. Review measurements below.`);
+                addAuditEntry('buildings_appended', `Added ${result.buildings.length} buildings from ${file.name}`);
+                setConfirmDialog(null);
+              },
+            });
           } else {
             setBuildings(result.buildings);
             setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
+            addAuditEntry('buildings_loaded', `Loaded ${result.buildings.length} buildings from ${file.name}`);
           }
         } else {
           setUploadStatus(`PDF parsed (${result.pageCount} pages) — file uploaded. No building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
@@ -117,22 +202,32 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
           if (result.buildings.length > 0) {
             if (buildings.length > 0) {
               // Ask user whether to replace or append
-              if (window.confirm('Buildings already loaded. Click OK to replace all, or Cancel to add new buildings to existing ones.')) {
-                setBuildings(result.buildings);
-                setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
-              } else {
-                // Append and renumber
-                const newBuildings = result.buildings.map((b, idx) => ({
-                  ...b,
-                  siteplanNum: String(buildings.length + idx + 1),
-                  roofrNum: String(buildings.length + idx + 1),
-                }));
-                setBuildings([...buildings, ...newBuildings]);
-                setUploadStatus(`Added ${result.buildings.length} buildings from "${result.jobName || file.name}" (renumbered). File uploaded.`);
-              }
+              setConfirmDialog({
+                title: 'Buildings Already Loaded',
+                message: 'Buildings already loaded. Click OK to replace all, or Cancel to add new buildings to existing ones.',
+                onConfirm: () => {
+                  setBuildings(result.buildings);
+                  setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
+                  addAuditEntry('buildings_replaced', `Replaced buildings with ${result.buildings.length} from ${file.name}`);
+                  setConfirmDialog(null);
+                },
+                onCancel: () => {
+                  // Append and renumber
+                  const newBuildings = result.buildings.map((b, idx) => ({
+                    ...b,
+                    siteplanNum: String(buildings.length + idx + 1),
+                    roofrNum: String(buildings.length + idx + 1),
+                  }));
+                  setBuildings([...buildings, ...newBuildings]);
+                  setUploadStatus(`Added ${result.buildings.length} buildings from "${result.jobName || file.name}" (renumbered). File uploaded.`);
+                  addAuditEntry('buildings_appended', `Added ${result.buildings.length} buildings from ${file.name}`);
+                  setConfirmDialog(null);
+                },
+              });
             } else {
               setBuildings(result.buildings);
               setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
+              addAuditEntry('buildings_loaded', `Loaded ${result.buildings.length} buildings from ${file.name}`);
             }
             if (result.jobName && !estimateName) setEstimateName(result.jobName);
             if (result.companyName && !estimateName) setEstimateName(result.companyName);
@@ -163,6 +258,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
+    e.target.value = ''; // Reset so same file can be re-selected
     await processFile(file);
   };
 
@@ -221,10 +317,18 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   };
 
   const handleDeleteBuilding = (index) => {
-    if (!window.confirm('Delete Building ' + (buildings[index]?.siteplanNum || index + 1) + '? This cannot be undone.')) return;
     if (buildings.length <= 1) return;
-    const updated = buildings.filter((_, i) => i !== index);
-    setBuildings(updated);
+    setConfirmDialog({
+      title: 'Delete Building',
+      message: `Delete Building ${buildings[index]?.siteplanNum || index + 1}? This cannot be undone.`,
+      onConfirm: () => {
+        const updated = buildings.filter((_, i) => i !== index);
+        setBuildings(updated);
+        addAuditEntry('building_deleted', `Building ${buildings[index]?.siteplanNum || index + 1} deleted`);
+        setConfirmDialog(null);
+      },
+      onCancel: () => setConfirmDialog(null),
+    });
   };
 
   const handleLoadDemo = () => {
@@ -233,23 +337,71 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     setUploadStatus('Loaded demo data (Willow Bridge — 5 buildings)');
   };
 
-  const handleSave = () => {
-    const totalCost = getTotalCost();
-    // Strip base64 data from file records — only save metadata + URLs
-    const cleanFiles = uploadedFiles.map(({ data, ...rest }) => rest);
-    const updated = {
-      ...(estimate || { id: estimateId, status: 'unassigned', createdAt: new Date().toISOString() }),
-      propertyName: estimateName,
-      state: marketState,
-      type: estimateType,
-      buildings,
-      tpoMaterials,
-      uploadedFiles: cleanFiles,
-      totalCost,
-      updatedAt: new Date().toISOString(),
-    };
-    onSave(updated);
-    setHasUnsavedChanges(false);
+  // Validate form and scroll to first error
+  const scrollToFirstError = () => {
+    requestAnimationFrame(() => {
+      const firstError = document.querySelector('[data-error="true"]');
+      if (firstError) {
+        firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const input = firstError.querySelector('input, textarea, select');
+        if (input) setTimeout(() => input.focus(), 400);
+      }
+    });
+  };
+
+  const validateForm = () => {
+    const errors = {};
+    if (!estimateName || estimateName.trim() === '') {
+      errors.estimateName = true;
+    }
+    if (estimateType !== 'tpo' && buildings.length === 0) {
+      errors.buildings = true;
+    }
+    if (estimateType === 'tpo' && tpoMaterials.length === 0) {
+      errors.tpoMaterials = true;
+    }
+    setValidationErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setTimeout(() => scrollToFirstError(), 100);
+    }
+    return errors;
+  };
+
+  const handleSave = async () => {
+    if (isSubmitting) return;
+
+    // Validate form before save
+    const errors = validateForm();
+    if (Object.keys(errors).length > 0) {
+      alert('Please fill in all required fields before saving.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const totalCost = getTotalCost();
+      // Strip base64 data from file records — only save metadata + URLs
+      const cleanFiles = uploadedFiles.map(({ data, ...rest }) => rest);
+      const updated = {
+        ...(estimate || { id: estimateId, status: 'unassigned', createdAt: new Date().toISOString() }),
+        propertyName: estimateName,
+        state: marketState,
+        type: estimateType,
+        buildings,
+        tpoMaterials,
+        uploadedFiles: cleanFiles,
+        totalCost,
+        updatedAt: new Date().toISOString(),
+      };
+      onSave(updated);
+      setHasUnsavedChanges(false);
+      addAuditEntry('estimate_saved', `Estimate saved with total cost ${totalCost}`);
+    } catch (err) {
+      console.error('Save error:', err);
+      alert('Error saving estimate: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Track unsaved changes: watch for changes but skip the initial render
@@ -272,6 +424,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasUnsavedChanges]);
+
+  // Browser back button interception
+  useEffect(() => {
+    const handlePopState = (e) => {
+      if (step > 1) {
+        e.preventDefault();
+        window.history.pushState(null, '', window.location.href);
+        setStep(prev => prev - 1);
+      }
+    };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [step]);
 
   // ==================== COST CALCULATIONS ====================
 
@@ -650,10 +816,15 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div>
+        <div data-error={validationErrors.estimateName ? "true" : undefined} style={{
+          borderRadius: 8,
+          padding: validationErrors.estimateName ? '8px' : '0',
+          backgroundColor: validationErrors.estimateName ? '#FFE5E5' : 'transparent',
+          border: validationErrors.estimateName ? `2px solid ${C.red}` : 'none',
+        }}>
           <label style={{ fontSize: 12, fontWeight: 600, color: C.navy, display: 'block', marginBottom: 6 }}>Estimate Name</label>
           <input type="text" value={estimateName} onChange={(e) => setEstimateName(e.target.value)}
-            style={{ width: '100%', padding: '10px 12px', border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+            style={{ width: '100%', padding: '10px 12px', border: `1px solid ${validationErrors.estimateName ? C.red : C.gray300}`, borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
         </div>
         <div>
           <label style={{ fontSize: 12, fontWeight: 600, color: C.navy, display: 'block', marginBottom: 6 }}>Market/State</label>
@@ -698,7 +869,13 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   const renderStep2 = () => {
     if (estimateType === 'tpo') {
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div data-error={validationErrors.tpoMaterials ? "true" : undefined} style={{
+          display: 'flex', flexDirection: 'column', gap: 20,
+          borderRadius: 8,
+          padding: validationErrors.tpoMaterials ? '8px' : '0',
+          backgroundColor: validationErrors.tpoMaterials ? '#FFE5E5' : 'transparent',
+          border: validationErrors.tpoMaterials ? `2px solid ${C.red}` : 'none',
+        }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>Materials ({tpoMaterials.length} items)</h3>
             <button onClick={() => setTpoMaterials([...tpoMaterials, { name: '', quantity: 0, unit: 'EA', unitCost: 0 }])}
@@ -712,7 +889,13 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     }
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div data-error={validationErrors.buildings ? "true" : undefined} style={{
+        display: 'flex', flexDirection: 'column', gap: 20,
+        borderRadius: 8,
+        padding: validationErrors.buildings ? '8px' : '0',
+        backgroundColor: validationErrors.buildings ? '#FFE5E5' : 'transparent',
+        border: validationErrors.buildings ? `2px solid ${C.red}` : 'none',
+      }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>Buildings ({buildings.length})</h3>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -734,6 +917,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
   const renderStep3 = () => {
     const warnings = BUILDING_CODE_WARNINGS[marketState] || [];
+
+    // Low margin warning banner
+    const getTotalMargin = () => {
+      const costs = estimateType === 'tile' ? getTileCosts() : estimateType === 'tpo' ? getTPOCosts() : getShingleCosts();
+      const total = costs.total || 0;
+      const subtotal = total / (1 + (STATE_FINANCIALS[marketState]?.margin || 0.25));
+      return total - subtotal;
+    };
+
+    const marginPercent = (() => {
+      const totalCost = getTotalCost();
+      const margin = getTotalMargin();
+      return totalCost > 0 ? (margin / totalCost) * 100 : 0;
+    })();
 
     if (estimateType === 'tpo') {
       const tpoCosts = getTPOCosts();
@@ -769,7 +966,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
             </tbody>
           </table>
 
-          {renderCostSummary(tpoCosts)}
+          {renderCostSummary(tpoCosts, canViewMargin)}
         </div>
       );
     }
@@ -812,9 +1009,64 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Low margin warning */}
+        {canViewMargin && marginPercent < 25 && (
+          <div style={{ padding: '10px 16px', background: '#FEE2E2', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <span style={{ fontSize: 14, color: '#DC2626', fontWeight: 600 }}>
+              Low margin alert: {marginPercent.toFixed(1)}% (minimum recommended: 25%)
+            </span>
+          </div>
+        )}
+
         <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>
           {estimateType === 'tile' ? 'Tile' : 'Shingle'} Pricing
         </h3>
+
+        {/* Multi-option pricing toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <label style={{ fontSize: 14, fontWeight: 600, color: '#252842' }}>Multi-Option Pricing</label>
+          <button
+            type="button"
+            onClick={() => setTiersEnabled(!tiersEnabled)}
+            className="pressable"
+            style={{
+              padding: '4px 12px',
+              borderRadius: 8,
+              border: '1px solid #E2E8F0',
+              background: tiersEnabled ? '#252842' : '#F5F5F7',
+              color: tiersEnabled ? '#fff' : '#6B7280',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            {tiersEnabled ? 'Enabled' : 'Off'}
+          </button>
+        </div>
+
+        {/* Tier tabs when enabled */}
+        {tiersEnabled && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: `2px solid #E2E8F0`, paddingBottom: 8 }}>
+            {['good', 'better', 'best'].map(tier => (
+              <button
+                key={tier}
+                onClick={() => setActiveTier(tier)}
+                style={{
+                  padding: '8px 16px',
+                  border: activeTier === tier ? `2px solid #252842` : `1px solid #E2E8F0`,
+                  background: activeTier === tier ? '#252842' : '#F5F5F7',
+                  color: activeTier === tier ? '#fff' : '#475569',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: activeTier === tier ? 600 : 500,
+                  fontSize: 13,
+                }}
+              >
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+              </button>
+            ))}
+          </div>
+        )}
 
         {warnings.length > 0 && (
           <div style={{ backgroundColor: C.blueBg, padding: 14, borderRadius: 8, borderLeft: `4px solid ${C.blue}` }}>
@@ -836,7 +1088,9 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Dumpster</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Permit</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tax ({(stFin.taxRate * 100).toFixed(1)}%)</th>
-                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Margin ({(stFin.margin * 100).toFixed(0)}%)</th>
+                {canViewMargin && (
+                  <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Margin ({(stFin.margin * 100).toFixed(0)}%)</th>
+                )}
                 <th style={{ ...ssHead, color: C.white }}>Total</th>
               </tr>
             </thead>
@@ -852,7 +1106,9 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.dumpster)}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.permit)}</td>
                   <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.taxAmount || 0)}</td>
-                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.margin)}</td>
+                  {canViewMargin && (
+                    <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.margin)}</td>
+                  )}
                   <td style={{ ...ssCellR, fontWeight: 700, color: C.navy }}>{fmt(row.bldgTotal)}</td>
                 </tr>
               ))}
@@ -868,16 +1124,49 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.dumpster)}</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.permit)}</td>
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.taxAmount)}</td>
-                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.margin)}</td>
+                {canViewMargin && (
+                  <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.margin)}</td>
+                )}
                 <td style={{ ...ssCellR, fontWeight: 700, color: C.red, fontSize: 13 }}>{fmt(colTotals.bldgTotal)}</td>
               </tr>
             </tfoot>
           </table>
         </div>
 
+        {/* Custom Line Items */}
+        <div style={{ marginTop: 24, padding: 16, border: '1px solid #E2E8F0', borderRadius: 12 }}>
+          <CustomLineItems
+            items={estimate?.customLineItems || []}
+            onChange={(items) => updateEstimate({ customLineItems: items })}
+            readOnly={false}
+          />
+        </div>
+
+        {/* Comment Thread */}
+        <div style={{ marginTop: 24 }}>
+          <CommentThread
+            comments={estimate?.comments || []}
+            currentUser={currentUser}
+            onAddComment={async (comment) => {
+              const updated = [...(estimate?.comments || []), comment];
+              updateEstimate({ comments: updated });
+            }}
+          />
+        </div>
+
+        {/* Revision History */}
+        <div style={{ marginTop: 24 }}>
+          <RevisionHistory revisions={estimate?.revisions || []} />
+        </div>
+
+        {/* Audit Trail */}
+        <div style={{ marginTop: 24 }}>
+          <AuditTrail entries={estimate?.auditTrail || []} />
+        </div>
+
         <div style={{
           backgroundColor: C.gray100, padding: 16, borderRadius: 8,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 24,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>Total Project Cost:</span>
           <span style={{ fontSize: 22, fontWeight: 700, color: C.red }}>{fmtInt(colTotals.bldgTotal)}</span>
@@ -1153,6 +1442,23 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
   const steps = ['Upload', 'Measurements', 'Calculations', 'Pricing', 'Proposal'];
 
+  // Show success screen after submission
+  if (showSuccess) {
+    return (
+      <SuccessScreen
+        title="Estimate Submitted for Review"
+        subtitle={estimate?.propertyName || estimate?.address || 'New Estimate'}
+        timestamp={new Date().toISOString()}
+        referenceId={estimate?.id || estimateId}
+        onStartNew={() => {
+          setShowSuccess(false);
+          onClose?.();
+        }}
+        startNewLabel="Back to Dashboard"
+      />
+    );
+  }
+
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: C.white }}>
       {/* Header */}
@@ -1162,8 +1468,19 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
             {estimateName || 'New Estimate'}
           </h2>
           <button onClick={() => {
-              if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Leave without saving?')) return;
-              onClose();
+              if (hasUnsavedChanges) {
+                setConfirmDialog({
+                  title: 'Unsaved Changes',
+                  message: 'You have unsaved changes. Leave without saving?',
+                  onConfirm: () => {
+                    setConfirmDialog(null);
+                    onClose();
+                  },
+                  onCancel: () => setConfirmDialog(null),
+                });
+              } else {
+                onClose();
+              }
             }}
             style={{ padding: '6px 12px', backgroundColor: C.gray200, color: C.gray600, border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
             Back to Dashboard
@@ -1205,8 +1522,19 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       }}>
         <button onClick={() => {
           if (step === 1) {
-            if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Leave without saving?')) return;
-            onClose();
+            if (hasUnsavedChanges) {
+              setConfirmDialog({
+                title: 'Unsaved Changes',
+                message: 'You have unsaved changes. Leave without saving?',
+                onConfirm: () => {
+                  setConfirmDialog(null);
+                  onClose();
+                },
+                onCancel: () => setConfirmDialog(null),
+              });
+            } else {
+              onClose();
+            }
           } else {
             setStep(step - 1);
           }
@@ -1215,18 +1543,76 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
           {step === 1 ? 'Cancel' : 'Back'}
         </button>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={handleSave}
-            style={{ padding: '10px 20px', backgroundColor: C.navy, color: C.white, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-            Save
+          <button
+            onClick={handleSave}
+            disabled={isSubmitting}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: isSubmitting ? C.gray400 : C.navy,
+              color: C.white,
+              border: 'none',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: isSubmitting ? 'not-allowed' : 'pointer',
+              opacity: isSubmitting ? 0.6 : 1,
+            }}>
+            {isSubmitting ? 'Saving...' : 'Save'}
           </button>
           {step < 5 && (
-            <button onClick={() => setStep(step + 1)}
-              style={{ padding: '10px 20px', backgroundColor: C.red, color: C.white, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            <button
+              onClick={() => setStep(step + 1)}
+              disabled={isSubmitting}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: isSubmitting ? C.gray400 : C.red,
+                color: C.white,
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                opacity: isSubmitting ? 0.6 : 1,
+              }}>
               Next
+            </button>
+          )}
+          {step === 5 && (
+            <button
+              onClick={() => {
+                setIsSubmitting(true);
+                setTimeout(() => {
+                  setShowSuccess(true);
+                  addAuditEntry('estimate_submitted', 'Estimate submitted for review');
+                }, 500);
+              }}
+              disabled={isSubmitting}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: isSubmitting ? C.gray400 : '#10B981',
+                color: C.white,
+                border: 'none',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                opacity: isSubmitting ? 0.6 : 1,
+              }}>
+              {isSubmitting ? 'Submitting...' : 'Submit for Review'}
             </button>
           )}
         </div>
       </div>
+
+      {/* Confirm Dialog */}
+      {confirmDialog && (
+        <ConfirmDialog
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={confirmDialog.onCancel}
+        />
+      )}
     </div>
   );
 }
@@ -1235,14 +1621,14 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 const thStyle = { padding: '12px 14px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: '#334155', borderBottom: '1px solid #E2E8F0' };
 const tdStyle = { padding: '10px 14px', fontSize: 13, color: '#475569' };
 
-const renderCostSummary = (costs) => (
+const renderCostSummary = (costs, showMargin = true) => (
   <div style={{ backgroundColor: '#F1F5F9', padding: 16, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
     <div>
       <div style={{ fontSize: 12, color: '#64748B', marginBottom: 4 }}>
-        Material: {fmt(costs.materialCost)} | Labor: {fmt(costs.laborCost)} | Tax: {fmt(costs.taxAmount)} | Margin: {fmt(costs.margin)}
+        Material: {fmt(costs.materialCost)} | Labor: {fmt(costs.laborCost)} | Tax: {fmt(costs.taxAmount)} {showMargin && `| Margin: ${fmt(costs.margin)}`}
       </div>
     </div>
-    <span style={{ fontSize: 22, fontWeight: 700, color: '#E63946' }}>{fmtInt(costs.total)}</span>
+    <span style={{ fontSize: 22, fontWeight: 700, color: '#E30613' }}>{fmtInt(costs.total)}</span>
   </div>
 );
 
