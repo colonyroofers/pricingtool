@@ -56,7 +56,8 @@ export const ESTIMATE_TYPES = [
   { key: "tpo", label: "TPO", icon: "🏢" },
 ];
 
-// Default shingle materials
+// Default shingle materials — state-specific pricing from FL & GA spreadsheets
+// TX and TN default to FL pricing until real spreadsheets are provided
 export const DEFAULT_SHINGLE_MATERIALS = [
   { id: "m1", name: "Architectural Shingles", spec: "Full roof", unit: "BNDL", category: "shingles", prices: { FL: 29.67, GA: 29.67, TX: 29.67, TN: 29.67 } },
   { id: "m2", name: "Hip and Ridge", spec: "All Ridges and Hips", unit: "BNDL", category: "shingles", prices: { FL: 65, GA: 65, TX: 65, TN: 65 } },
@@ -64,18 +65,35 @@ export const DEFAULT_SHINGLE_MATERIALS = [
   { id: "m4", name: "Synthetic Underlayment", spec: "Full roof", unit: "ROLL", category: "underlayment", prices: { FL: 60, GA: 60, TX: 60, TN: 60 } },
   { id: "m5", name: "Ice and Water Shield", spec: "All valleys and step walls", unit: "ROLL", category: "underlayment", prices: { FL: 60, GA: 60, TX: 60, TN: 60 } },
   { id: "m6", name: "Ridge Vent", spec: "All ridges", unit: "EACH", category: "accessories", prices: { FL: 7, GA: 7, TX: 7, TN: 7 } },
-  { id: "m7", name: "Off-Ridge Vents", spec: "All off-ridge", unit: "EACH", category: "accessories", prices: { FL: 80, GA: 80, TX: 80, TN: 80 } },
+  { id: "m7", name: "Off-Ridge Vents", spec: "All off-ridge", unit: "EACH", category: "accessories", prices: { FL: 80, GA: 0, TX: 80, TN: 80 }, stateExclude: ["GA"] },
   { id: "m8", name: "Step Flashing", spec: "All step flashing", unit: "BOX", category: "flashing", prices: { FL: 55, GA: 55, TX: 55, TN: 55 } },
-  { id: "m9", name: "Drip Edge", spec: "Rakes and Eaves", unit: "EACH", category: "flashing", prices: { FL: 9.75, GA: 9.75, TX: 9.75, TN: 9.75 } },
-  { id: "m10", name: "Coil Nails", spec: "Full roof", unit: "BOX", category: "fasteners", prices: { FL: 36, GA: 36, TX: 36, TN: 36 } },
-  { id: "m11", name: "Cap Nails", spec: "Full roof", unit: "BOX", category: "fasteners", prices: { FL: 16, GA: 16, TX: 16, TN: 16 } },
-  { id: "m12", name: "Pipe Boots", spec: "All pipes", unit: "EACH", category: "accessories", prices: { FL: 4.75, GA: 4.75, TX: 4.75, TN: 4.75 } },
-  { id: "m13", name: "Roof Cement", spec: "All Rakes and Eaves", unit: "BCKT", category: "accessories", prices: { FL: 8, GA: 8, TX: 8, TN: 8 } },
-  { id: "m14", name: "Touch Paint", spec: "All pipes", unit: "EACH", category: "accessories", prices: { FL: 7.25, GA: 7.25, TX: 7.25, TN: 7.25 } },
+  { id: "m9", name: "Drip Edge", spec: "Rakes and Eaves", unit: "EACH", category: "flashing", prices: { FL: 9.75, GA: 6.95, TX: 9.75, TN: 9.75 } },
+  { id: "m10", name: "Coil Nails", spec: "Full roof", unit: "BOX", category: "fasteners", prices: { FL: 36, GA: 40, TX: 36, TN: 36 } },
+  { id: "m11", name: "Cap Nails", spec: "Full roof", unit: "BOX", category: "fasteners", prices: { FL: 16, GA: 22, TX: 16, TN: 16 } },
+  { id: "m12", name: "Pipe Boots", spec: "All pipes", unit: "EACH", category: "accessories", prices: { FL: 4.75, GA: 4.95, TX: 4.75, TN: 4.75 } },
+  { id: "m13", name: "Roof Cement", spec: "All Rakes and Eaves", unit: "BCKT", category: "accessories", prices: { FL: 8, GA: 0, TX: 8, TN: 8 }, stateExclude: ["GA"] },
+  { id: "m14", name: "Touch Paint", spec: "All pipes", unit: "EACH", category: "accessories", prices: { FL: 7.25, GA: 6.95, TX: 7.25, TN: 7.25 } },
   { id: "m15", name: "NP1", spec: "All pipes", unit: "EACH", category: "accessories", prices: { FL: 8, GA: 8, TX: 8, TN: 8 } },
 ];
 
-// Default labor
+// State-specific labor rates (from FL & GA spreadsheets)
+// TX defaults to FL, TN defaults to GA
+export const STATE_LABOR = {
+  FL: { laborPerSquare: 120, forkliftCost: 6564, dumpsterCost: 19840, permitCost: 3440, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'pitched' },
+  GA: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'total' },
+  TX: { laborPerSquare: 120, forkliftCost: 6564, dumpsterCost: 19840, permitCost: 3440, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'pitched' },
+  TN: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'total' },
+};
+
+// State-specific financials (from FL & GA spreadsheets)
+export const STATE_FINANCIALS = {
+  FL: { margin: 0.25, taxRate: 0.075 },
+  GA: { margin: 0.30, taxRate: 0.089 },
+  TX: { margin: 0.25, taxRate: 0.075 },
+  TN: { margin: 0.30, taxRate: 0.089 },
+};
+
+// Legacy defaults (for backward compat / non-shingle calcs)
 export const DEFAULT_LABOR = {
   tearOffRate: 120,
   forkliftCost: 6564,
@@ -84,8 +102,6 @@ export const DEFAULT_LABOR = {
   osbPerSheet: 42.95,
   warrantyPerSq: 11,
 };
-
-// Default financials
 export const DEFAULT_FINANCIALS = {
   margin: 0.25,
   taxRate: 0.075,

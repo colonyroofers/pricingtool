@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { C, EMPTY_BUILDING, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FINANCIALS,
+  STATE_LABOR, STATE_FINANCIALS,
   BUILDING_CODE_WARNINGS, SCOPE_ITEMS, UNIT_COSTS_TEXT, EXCLUSIONS, TPO_DEFAULT_LABOR,
   fmt, fmtInt, generateId } from '../utils/constants';
-import { calculateBuildingCost, calculateTPOCost, calculateTileCost,
+import { calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
   parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
 import DataTable from '../components/DataTable';
 
@@ -121,13 +122,13 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   // ==================== COST CALCULATIONS ====================
 
   const getShingleCosts = () => {
-    let total = 0;
-    const rows = buildings.map(b => {
-      const cost = calculateBuildingCost(b, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FINANCIALS, marketState);
-      total += cost.total;
-      return { building: b.siteplanNum, ...cost };
-    });
-    return { rows, total };
+    // Use the new estimate-level calculator that handles equipment splitting
+    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState);
+    const rows = result.buildings.map((cost, i) => ({
+      building: buildings[i]?.siteplanNum || String(i + 1),
+      ...cost,
+    }));
+    return { rows, total: result.grandTotal, summary: result };
   };
 
   const getTPOCosts = () => {

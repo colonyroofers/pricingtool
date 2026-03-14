@@ -1,63 +1,203 @@
-import { TPO_UNIT_COSTS, TPO_DEFAULT_LABOR } from './constants';
+import { TPO_UNIT_COSTS, TPO_DEFAULT_LABOR, STATE_LABOR, STATE_FINANCIALS } from './constants';
 
 // ==================== SHINGLE CALCULATIONS ====================
+// Formulas extracted directly from FL & GA "Total Cost Calc" spreadsheets.
+// FL and GA have different quantity formulas for some items.
 
 export const calculateShingleMaterials = (building, materials, state) => {
-  const { totalArea, wastePercent, eaves = 0, valleys = 0, hips = 0, ridges = 0, rakes = 0, wallFlashing = 0, stepFlashing = 0, pipes = 0 } = building;
-  const adjustedArea = totalArea * (1 + (wastePercent || 12) / 100);
+  const {
+    totalArea = 0, pitchedArea = 0, wastePercent = 12,
+    eaves = 0, valleys = 0, hips = 0, ridges = 0, rakes = 0,
+    wallFlashing = 0, stepFlashing = 0, pipes = 0,
+  } = building;
+
+  const waste = (wastePercent || 12) / 100;
+  const adjustedArea = totalArea * (1 + waste);
   const squares = adjustedArea / 100;
 
+  // --- Quantity formulas matching spreadsheets exactly ---
+
+  // m1: Shingles — ROUNDUP((totalArea * (1 + waste%)) / 100 * 3, 0) bundles
   const shingleBundles = Math.ceil(squares * 3);
-  const starterLF = (eaves || 0) + (rakes || 0);
-  const starterBundles = Math.ceil(starterLF / 120);
-  const hipRidgeLF = (hips || 0) + (ridges || 0);
-  const hipRidgeBundles = Math.ceil(hipRidgeLF / 33);
-  const iceWaterLF = (eaves || 0) + (valleys || 0) + (stepFlashing || 0);
-  const iceWaterRolls = Math.ceil(iceWaterLF / 66.7);
-  const syntheticRolls = Math.ceil(adjustedArea / 1000);
-  const ridgeVentCount = Math.ceil((ridges || 0) / 4);
-  const stepFlashingBoxes = Math.ceil((stepFlashing || 0) / 100);
-  const dripEdgeCount = Math.ceil(starterLF / 10);
-  const coilNailBoxes = Math.ceil(squares / 25);
-  const capNailBoxes = Math.ceil(syntheticRolls / 6);
-  const pipeBoots = pipes || 0;
+
+  // m2: Hip & Ridge — ROUNDUP((ridges + hips) / 25, 0) bundles
+  const hipRidgeBundles = Math.ceil((ridges + hips) / 25);
+
+  // m3: Starter Strip — ROUNDUP((rakes + eaves) / 116, 0) bundles
+  const starterBundles = Math.ceil((rakes + eaves) / 116);
+
+  // m4: Synthetic Underlayment — differs by state
+  // FL: ROUNDUP(totalArea / 950, 0) * 2 rolls (doubled)
+  // GA: ROUNDUP(totalArea / 950, 0) rolls (single layer)
+  const syntheticRolls = state === 'GA' || state === 'TN'
+    ? Math.ceil(totalArea / 950)
+    : Math.ceil(totalArea / 950) * 2;
+
+  // m5: Ice & Water Shield — ROUNDUP((valleys + stepFlashing) / 62, 0) rolls
+  const iceWaterRolls = Math.ceil((valleys + stepFlashing) / 62);
+
+  // m6: Ridge Vent — ROUNDUP(ridges / 4, 0) each
+  const ridgeVentCount = Math.ceil(ridges / 4);
+
+  // m7: Off-Ridge Vents — FL only (count from measurement data); GA excludes this
+  const offRidgeVents = (state === 'GA' || state === 'TN') ? 0 : (building.offRidgeVents || 0);
+
+  // m8: Step Flashing — ROUNDUP(stepFlashing / 60, 0) boxes
+  const stepFlashingBoxes = Math.ceil(stepFlashing / 60);
+
+  // m9: Drip Edge — ROUNDUP((eaves + rakes) / 9.5, 0) each
+  const dripEdgeCount = Math.ceil((eaves + rakes) / 9.5);
+
+  // m10: Coil Nails — ROUND(((totalArea * (1+waste%)) / 100) * 400 / 7200, 0) boxes
+  const coilNailBoxes = Math.round(squares * 400 / 7200);
+
+  // m11: Cap Nails — ROUND(totalArea * (1+waste%) / 2000, 0) boxes
+  const capNailBoxes = Math.round(adjustedArea / 2000);
+
+  // m12: Pipe Boots — pipe count
+  const pipeBoots = pipes;
+
+  // m13: Roof Cement — FL only: ROUNDUP((eaves + rakes) / 100, 0) buckets; GA excludes this
+  const roofCement = (state === 'GA' || state === 'TN') ? 0 : Math.ceil((eaves + rakes) / 100);
+
+  // m14: Touch Paint — pipe count
+  const touchPaint = pipes;
+
+  // m15: NP1 — pipe count
+  const np1 = pipes;
 
   return {
-    shingleBundles, starterBundles, hipRidgeBundles, iceWaterRolls,
-    syntheticRolls, ridgeVentCount, stepFlashingBoxes, dripEdgeCount,
-    coilNailBoxes, capNailBoxes, pipeBoots, adjustedArea, squares,
+    shingleBundles, hipRidgeBundles, starterBundles, syntheticRolls,
+    iceWaterRolls, ridgeVentCount, offRidgeVents, stepFlashingBoxes,
+    dripEdgeCount, coilNailBoxes, capNailBoxes, pipeBoots,
+    roofCement, touchPaint, np1,
+    adjustedArea, squares,
   };
 };
 
+/**
+ * Calculate total cost for one building using state-specific formulas.
+ * Equipment costs (forklift, dumpster, permit) are NOT included per-building —
+ * they are split evenly across all buildings at the estimate level.
+ */
 export const calculateBuildingCost = (building, materials, labor, financials, state) => {
+  // Use state-specific config, falling back to passed-in values
+  const stLabor = STATE_LABOR[state] || labor;
+  const stFin = STATE_FINANCIALS[state] || financials;
+
   const qty = calculateShingleMaterials(building, materials, state);
+
+  // Build price lookup from materials array
   const prices = {};
   materials.forEach(m => { prices[m.id] = m.prices[state] || 0; });
 
-  const materialCost =
-    qty.shingleBundles * (prices.m1 || 29.67) +
-    qty.hipRidgeBundles * (prices.m2 || 65) +
-    qty.starterBundles * (prices.m3 || 42) +
-    qty.syntheticRolls * (prices.m4 || 60) +
-    qty.iceWaterRolls * (prices.m5 || 60) +
-    qty.ridgeVentCount * (prices.m6 || 7) +
-    qty.stepFlashingBoxes * (prices.m8 || 55) +
-    qty.dripEdgeCount * (prices.m9 || 9.75) +
-    qty.coilNailBoxes * (prices.m10 || 36) +
-    qty.capNailBoxes * (prices.m11 || 16) +
-    qty.pipeBoots * (prices.m12 || 4.75) +
-    1 * (prices.m13 || 8) +
-    qty.pipeBoots * (prices.m14 || 7.25) +
-    qty.pipeBoots * (prices.m15 || 8);
+  // Material line items
+  const lineItems = [
+    { id: 'm1', name: 'Architectural Shingles', qty: qty.shingleBundles, price: prices.m1 || 29.67 },
+    { id: 'm2', name: 'Hip and Ridge', qty: qty.hipRidgeBundles, price: prices.m2 || 65 },
+    { id: 'm3', name: 'Starter Strip', qty: qty.starterBundles, price: prices.m3 || 42 },
+    { id: 'm4', name: 'Synthetic Underlayment', qty: qty.syntheticRolls, price: prices.m4 || 60 },
+    { id: 'm5', name: 'Ice and Water Shield', qty: qty.iceWaterRolls, price: prices.m5 || 60 },
+    { id: 'm6', name: 'Ridge Vent', qty: qty.ridgeVentCount, price: prices.m6 || 7 },
+  ];
 
-  const laborCost = qty.squares * labor.tearOffRate;
-  const equipmentCost = (labor.forkliftCost || 0) + (labor.dumpsterCost || 0) + (labor.permitCost || 0);
-  const taxAmount = materialCost * financials.taxRate;
-  const subtotal = materialCost + laborCost + equipmentCost + taxAmount;
-  const margin = subtotal / (1 - financials.margin) - subtotal;
+  // Off-Ridge Vents — FL/TX/TN only
+  if (state !== 'GA' && state !== 'TN') {
+    lineItems.push({ id: 'm7', name: 'Off-Ridge Vents', qty: qty.offRidgeVents, price: prices.m7 || 80 });
+  }
+
+  lineItems.push(
+    { id: 'm8', name: 'Step Flashing', qty: qty.stepFlashingBoxes, price: prices.m8 || 55 },
+    { id: 'm9', name: 'Drip Edge', qty: qty.dripEdgeCount, price: prices.m9 || 9.75 },
+    { id: 'm10', name: 'Coil Nails', qty: qty.coilNailBoxes, price: prices.m10 || 36 },
+    { id: 'm11', name: 'Cap Nails', qty: qty.capNailBoxes, price: prices.m11 || 16 },
+    { id: 'm12', name: 'Pipe Boots', qty: qty.pipeBoots, price: prices.m12 || 4.75 },
+  );
+
+  // Roof Cement — FL/TX only (GA excludes this)
+  if (state !== 'GA' && state !== 'TN') {
+    lineItems.push({ id: 'm13', name: 'Roof Cement', qty: qty.roofCement, price: prices.m13 || 8 });
+  }
+
+  lineItems.push(
+    { id: 'm14', name: 'Touch Paint', qty: qty.touchPaint, price: prices.m14 || 7.25 },
+    { id: 'm15', name: 'NP1', qty: qty.np1, price: prices.m15 || 8 },
+  );
+
+  const materialCost = lineItems.reduce((sum, li) => sum + (li.qty * li.price), 0);
+
+  // Labor — state-specific basis
+  // FL: ROUNDUP(pitchedArea_with_waste / 100, 0) * laborPerSquare
+  // GA: ROUNDUP(totalArea / 100, 0) * laborPerSquare
+  const { totalArea = 0, pitchedArea = 0, wastePercent = 12 } = building;
+  const waste = (wastePercent || 12) / 100;
+  let laborSquares;
+  if (stLabor.laborBasis === 'total') {
+    laborSquares = Math.ceil(totalArea / 100);
+  } else {
+    // 'pitched' — use pitched area with waste
+    const pitchedWithWaste = (pitchedArea || totalArea) * (1 + waste);
+    laborSquares = Math.ceil(pitchedWithWaste / 100);
+  }
+  const laborCost = laborSquares * stLabor.laborPerSquare;
+
+  // Tax on materials only
+  const taxAmount = materialCost * stFin.taxRate;
+
+  // Subtotal (equipment split at estimate level, not per-building)
+  const subtotal = materialCost + laborCost + taxAmount;
+
+  // Margin: total = subtotal / (1 - margin%)
+  const margin = subtotal / (1 - stFin.margin) - subtotal;
   const total = subtotal + margin;
 
-  return { materialCost, laborCost, equipmentCost, taxAmount, margin, total, quantities: qty };
+  return {
+    materialCost, laborCost, taxAmount, margin, total,
+    quantities: qty, lineItems, laborSquares,
+  };
+};
+
+/**
+ * Calculate full estimate cost across all buildings with equipment split.
+ * Equipment (forklift, dumpster, permit) is split evenly across buildings.
+ */
+export const calculateEstimateCost = (buildings, materials, state) => {
+  const stLabor = STATE_LABOR[state] || STATE_LABOR.FL;
+  const stFin = STATE_FINANCIALS[state] || STATE_FINANCIALS.FL;
+  const numBuildings = buildings.length || 1;
+
+  // Equipment cost split evenly
+  const totalEquipment = stLabor.forkliftCost + stLabor.dumpsterCost + stLabor.permitCost;
+  const equipmentPerBuilding = totalEquipment / numBuildings;
+
+  let grandMaterialCost = 0;
+  let grandLaborCost = 0;
+  let grandTaxAmount = 0;
+
+  const buildingResults = buildings.map(bldg => {
+    const result = calculateBuildingCost(bldg, materials, stLabor, stFin, state);
+    grandMaterialCost += result.materialCost;
+    grandLaborCost += result.laborCost;
+    grandTaxAmount += result.taxAmount;
+    return { ...result, equipmentCost: equipmentPerBuilding };
+  });
+
+  const grandSubtotal = grandMaterialCost + grandLaborCost + totalEquipment + grandTaxAmount;
+  const grandMargin = grandSubtotal / (1 - stFin.margin) - grandSubtotal;
+  const grandTotal = grandSubtotal + grandMargin;
+
+  return {
+    buildings: buildingResults,
+    totalMaterial: grandMaterialCost,
+    totalLabor: grandLaborCost,
+    totalEquipment,
+    totalTax: grandTaxAmount,
+    totalMargin: grandMargin,
+    grandTotal,
+    state,
+    financials: stFin,
+    labor: stLabor,
+  };
 };
 
 // ==================== TPO CALCULATIONS ====================
