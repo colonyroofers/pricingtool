@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, NAV_ITEMS } from './utils/constants';
+import { C, NAV_ITEMS, ESTIMATE_STATUSES } from './utils/constants';
 import { useAuth, useFirestoreCollection, useIsMobile } from './hooks/index';
 import LoginScreen from './components/LoginScreen';
 import Spinner from './components/Spinner';
@@ -17,24 +17,66 @@ export default function App() {
   const isMobile = useIsMobile();
   const [estimates, setEstimates] = useFirestoreCollection('estimates', []);
   const [demoMode, setDemoMode] = useState(true);
+  const [activeEstimate, setActiveEstimate] = useState(null);
 
-  // Handle demo mode (bypass Firebase auth when config has placeholders)
   const isLoggedIn = demoMode || user;
 
   const handleAddEstimate = (estimate) => {
     setEstimates([...estimates, estimate]);
   };
 
+  const handleUpdateEstimate = (updated) => {
+    setEstimates(estimates.map(e => e.id === updated.id ? updated : e));
+  };
+
+  const handleDeleteEstimate = (estimateId) => {
+    setEstimates(estimates.filter(e => e.id !== estimateId));
+  };
+
   const handleStatusChange = (estimateId, newStatus) => {
     setEstimates(estimates.map(e => e.id === estimateId ? { ...e, status: newStatus } : e));
+  };
+
+  const handleOpenEstimate = (estimate) => {
+    setActiveEstimate(estimate);
+    setActiveNav('estimates');
+  };
+
+  const handleCloseEstimate = () => {
+    setActiveEstimate(null);
+    setActiveNav('dashboard');
+  };
+
+  const handleSaveEstimate = (updatedEstimate) => {
+    const exists = estimates.find(e => e.id === updatedEstimate.id);
+    if (exists) {
+      handleUpdateEstimate(updatedEstimate);
+    } else {
+      handleAddEstimate(updatedEstimate);
+    }
   };
 
   const renderModule = () => {
     switch (activeNav) {
       case 'dashboard':
-        return <DashboardModule estimates={estimates} onAddEstimate={handleAddEstimate} onStatusChange={handleStatusChange} />;
+        return (
+          <DashboardModule
+            estimates={estimates}
+            onAddEstimate={handleAddEstimate}
+            onStatusChange={handleStatusChange}
+            onOpenEstimate={handleOpenEstimate}
+            onDeleteEstimate={handleDeleteEstimate}
+            onUpdateEstimate={handleUpdateEstimate}
+          />
+        );
       case 'estimates':
-        return <EstimateWizard />;
+        return (
+          <EstimateWizard
+            estimate={activeEstimate}
+            onSave={handleSaveEstimate}
+            onClose={handleCloseEstimate}
+          />
+        );
       case 'catalog':
         return <ProductCatalogModule />;
       case 'vendors':
@@ -139,7 +181,14 @@ export default function App() {
           {NAV_ITEMS.map(item => (
             <button
               key={item.key}
-              onClick={() => setActiveNav(item.key)}
+              onClick={() => {
+                if (item.key === 'estimates' && !activeEstimate) {
+                  setActiveNav('estimates');
+                  setActiveEstimate(null);
+                } else {
+                  setActiveNav(item.key);
+                }
+              }}
               style={{
                 width: '100%',
                 padding: '12px 12px',
@@ -157,12 +206,12 @@ export default function App() {
               }}
               onMouseOver={(e) => {
                 if (activeNav !== item.key) {
-                  e.target.style.backgroundColor = C.navyLight;
+                  e.currentTarget.style.backgroundColor = C.navyLight;
                 }
               }}
               onMouseOut={(e) => {
                 if (activeNav !== item.key) {
-                  e.target.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.backgroundColor = 'transparent';
                 }
               }}
             >
@@ -196,7 +245,7 @@ export default function App() {
               fontSize: 16,
             }}
           >
-            {sidebarCollapsed ? '→' : '←'}
+            {sidebarCollapsed ? '\u2192' : '\u2190'}
           </button>
         </div>
       </div>
@@ -233,7 +282,9 @@ export default function App() {
               margin: 0,
             }}
           >
-            {navItem?.label}
+            {activeEstimate && activeNav === 'estimates'
+              ? `Estimate: ${activeEstimate.propertyName}`
+              : navItem?.label}
           </h1>
 
           <div style={{
