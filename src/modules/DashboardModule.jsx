@@ -3,10 +3,7 @@ import { C, ESTIMATE_TYPES, ESTIMATE_STATUSES, generateId } from '../utils/const
 import KanbanBoard from '../components/KanbanBoard';
 import Modal from '../components/Modal';
 
-const ESTIMATORS = [
-  { name: 'Joseph', value: 'Joseph' },
-  { name: 'J. Garside', value: 'J. Garside' },
-];
+// Estimators are passed in via team prop
 
 const inputStyle = {
   padding: '10px 12px',
@@ -17,7 +14,8 @@ const inputStyle = {
   boxSizing: 'border-box',
 };
 
-export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate }) {
+export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate, team = [], currentUser = {} }) {
+  const ESTIMATORS = (team || []).filter(t => t.role === 'estimator' && t.active).map(t => ({ name: t.name, value: t.name }));
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEstimate, setEditingEstimate] = useState(null);

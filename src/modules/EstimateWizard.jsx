@@ -50,26 +50,36 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
         const result = await parseRoofRPDF(file);
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
-          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages`);
+          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. Review measurements below.`);
         } else {
-          setUploadStatus(`PDF parsed (${result.pageCount} pages) — no building data auto-detected. Raw text extracted. You can add buildings manually.`);
+          setUploadStatus(`PDF parsed (${result.pageCount} pages) — no building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
         }
       } else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
         if (estimateType === 'tpo') {
           const result = await parseBeamAIExcel(file);
           setTpoMaterials(result.materials);
-          setUploadStatus(`Imported ${result.materials.length} materials from ${file.name}`);
+          setUploadStatus(`Imported ${result.materials.length} material line items from ${file.name}. Unit costs auto-matched where possible.`);
         } else {
           const result = await parseShingleExcel(file);
           if (result.buildings.length > 0) {
             setBuildings(result.buildings);
-            setUploadStatus(`Imported ${result.buildings.length} buildings from ${file.name}`);
+            if (result.jobName && !estimateName) setEstimateName(result.jobName);
+            if (result.companyName && !estimateName) setEstimateName(result.companyName);
+            setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". All measurements populated.`);
           } else {
-            setUploadStatus(`Spreadsheet parsed — no measurement data found. Try uploading a Roof-R export or add buildings manually.`);
+            // Try Beam AI format as fallback
+            const beamResult = await parseBeamAIExcel(file);
+            if (beamResult.materials.length > 0) {
+              setTpoMaterials(beamResult.materials);
+              setEstimateType('tpo');
+              setUploadStatus(`Detected Beam AI format — imported ${beamResult.materials.length} materials. Switched to TPO estimate type.`);
+            } else {
+              setUploadStatus(`No measurement data found. Ensure the file has a "Measurement Import" sheet or Beam AI TAKEOFF format.`);
+            }
           }
         }
       } else {
-        setUploadStatus('Unsupported file type. Please upload PDF or Excel files.');
+        setUploadStatus('Unsupported file type. Upload PDF (.pdf) or Excel (.xlsx) files.');
       }
     } catch (err) {
       console.error('Parse error:', err);

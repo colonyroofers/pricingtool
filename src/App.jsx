@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, NAV_ITEMS, ESTIMATE_STATUSES } from './utils/constants';
+import { C, NAV_ITEMS, ESTIMATE_STATUSES, ROLE_PRESETS } from './utils/constants';
 import { useAuth, useFirestoreCollection, useIsMobile } from './hooks/index';
 import LoginScreen from './components/LoginScreen';
 import Spinner from './components/Spinner';
@@ -10,16 +10,31 @@ import VendorCatalogModule from './modules/VendorCatalogModule';
 import TeamModule from './modules/TeamModule';
 import SettingsModule from './modules/SettingsModule';
 
+// Default team
+const DEFAULT_TEAM = [
+  { id: '1', name: 'Zach Reece', email: 'zach@colonyroofers.com', role: 'admin', active: true },
+  { id: '2', name: 'Joseph', email: 'joseph@colonyroofers.com', role: 'estimator', active: true },
+  { id: '3', name: 'J. Garside', email: 'jgarside@colonyroofers.com', role: 'estimator', active: true },
+  { id: '4', name: 'Brayleigh', email: 'brayleigh@colonyroofers.com', role: 'reviewer', active: true },
+];
+
 export default function App() {
   const { user, loading } = useAuth();
   const [activeNav, setActiveNav] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isMobile = useIsMobile();
   const [estimates, setEstimates] = useFirestoreCollection('estimates', []);
+  const [team, setTeam] = useFirestoreCollection('team', DEFAULT_TEAM);
   const [demoMode, setDemoMode] = useState(true);
   const [activeEstimate, setActiveEstimate] = useState(null);
+  const [currentUser, setCurrentUser] = useState({ name: 'Zach Reece', role: 'admin' });
 
   const isLoggedIn = demoMode || user;
+
+  // Role-based estimate filtering
+  const visibleEstimates = currentUser.role === 'estimator'
+    ? estimates.filter(e => e.estimator === currentUser.name || e.status === 'unassigned')
+    : estimates;
 
   const handleAddEstimate = (estimate) => {
     setEstimates([...estimates, estimate]);
@@ -61,12 +76,14 @@ export default function App() {
       case 'dashboard':
         return (
           <DashboardModule
-            estimates={estimates}
+            estimates={visibleEstimates}
             onAddEstimate={handleAddEstimate}
             onStatusChange={handleStatusChange}
             onOpenEstimate={handleOpenEstimate}
             onDeleteEstimate={handleDeleteEstimate}
             onUpdateEstimate={handleUpdateEstimate}
+            team={team}
+            currentUser={currentUser}
           />
         );
       case 'estimates':
@@ -82,7 +99,7 @@ export default function App() {
       case 'vendors':
         return <VendorCatalogModule />;
       case 'team':
-        return <TeamModule />;
+        return <TeamModule team={team} setTeam={setTeam} />;
       case 'settings':
         return <SettingsModule />;
       default:
@@ -290,26 +307,45 @@ export default function App() {
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 16,
+            gap: 12,
           }}>
+            <select
+              value={currentUser.name}
+              onChange={(e) => {
+                const member = team.find(t => t.name === e.target.value);
+                if (member) setCurrentUser({ name: member.name, role: member.role });
+              }}
+              style={{
+                padding: '4px 8px',
+                border: `1px solid ${C.gray300}`,
+                borderRadius: 6,
+                fontSize: 12,
+                color: C.gray700,
+                backgroundColor: C.white,
+              }}
+            >
+              {team.filter(t => t.active).map(t => (
+                <option key={t.id} value={t.name}>{t.name}</option>
+              ))}
+            </select>
             <div
               style={{
                 padding: '4px 10px',
-                backgroundColor: C.redBg,
+                backgroundColor: ROLE_PRESETS[currentUser.role]?.color ? `${ROLE_PRESETS[currentUser.role].color}20` : C.redBg,
                 borderRadius: 12,
                 fontSize: 11,
                 fontWeight: 700,
-                color: C.red,
+                color: ROLE_PRESETS[currentUser.role]?.color || C.red,
               }}
             >
-              Admin
+              {ROLE_PRESETS[currentUser.role]?.label || 'Admin'}
             </div>
 
             <div
               style={{
                 width: 32,
                 height: 32,
-                backgroundColor: C.blue,
+                backgroundColor: ROLE_PRESETS[currentUser.role]?.color || C.blue,
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
@@ -317,10 +353,9 @@ export default function App() {
                 color: C.white,
                 fontSize: 12,
                 fontWeight: 600,
-                cursor: 'pointer',
               }}
             >
-              Z
+              {currentUser.name.charAt(0)}
             </div>
           </div>
         </div>

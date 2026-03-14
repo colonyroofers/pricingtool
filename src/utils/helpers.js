@@ -84,7 +84,9 @@ export const calculateTPOCost = (materials, labor, financials) => {
     lineItems.push({ name: item.name, quantity: item.quantity, unit: item.unit, unitCost, lineCost });
   });
 
-  const totalSF = materials.find(m => (m.name || '').toUpperCase().includes('MEMBRANE'))?.quantity || 0;
+  const totalSF = materials
+    .filter(m => (m.name || '').toUpperCase().includes('MEMBRANE') || (m.name || '').toUpperCase().includes('ROOF ASSEMBLY'))
+    .reduce((sum, m) => sum + (m.quantity || 0), 0);
   const laborCost = totalSF * (labor?.installPerSf || TPO_DEFAULT_LABOR.installPerSf);
   const tearOffCost = totalSF * (labor?.tearOffPerSf || TPO_DEFAULT_LABOR.tearOffPerSf);
   const cleanupCost = totalSF * (labor?.cleanupPerSf || TPO_DEFAULT_LABOR.cleanupPerSf);
@@ -134,164 +136,275 @@ export const calculateTileCost = (building, labor, financials, state) => {
 
 // ==================== FILE PARSING ====================
 
+/**
+ * Parse Roof-R PDF report.
+ * Format: Each building section starts with "Summary of all structures from report #N"
+ * Measurements use labels like "Total roof area", "Total eaves", etc.
+ * Linear measurements are in "Xft Yin" format.
+ */
 export const parseRoofRPDF = async (file) => {
   const pdfjsLib = await import('pdfjs-dist');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const buildings = [];
   let allText = '';
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
     const pageText = textContent.items.map(item => item.str).join(' ');
-    allText += pageText + '\n';
+    allText += pageText + '\n---PAGE_BREAK---\n';
   }
 
-  // Parse building sections from Roof-R format
-  const sections = allText.split(/Building\s*#?\s*(\d+)/gi);
+  const buildings = [];
 
-  if (sections.length > 1) {
-    for (let i = 1; i < sections.length; i += 2) {
-      const num = sections[i];
-      const content = sections[i + 1] || '';
+  // Helper: parse "756ft 4in" -> 756.33
+  const parseFtIn = (str) => {
+    if (!str) return 0;
+    const m = str.match(/(\d[\d,]*)ft\s*(\d+)?in/);
+    if (m) return parseFloat(m[1].replace(/,/g, '')) + (parseInt(m[2] || 0) / 12);
+    const m2 = str.match(/([\d,]+(?:\.\d+)?)/);
+    return m2 ? parseFloat(m2[1].replace(/,/g, '')) : 0;
+  };
 
-      const getNum = (pattern) => {
-        const m = content.match(pattern);
-        return m ? parseFloat(m[1].replace(/,/g, '')) : 0;
+  // Helper: parse "12997 sqft" or just "12997"
+  const parseSqft = (str) => {
+    if (!str) return 0;
+    const m = str.match(/([\d,]+(?:\.\d+)?)/);
+    return m ? parseFloat(m[1].replace(/,/g, '')) : 0;
+  };
+
+  // Split by report sections — look for "report #N" pattern
+  const reportPattern = /report\s*#?\s*(\d+)/gi;
+  let match;
+  const reportPositions = [];
+  while ((match = reportPattern.exec(allText)) !== null) {
+    reportPositions.push({ num: parseInt(match[1]), pos: match.index });
+  }
+
+  if (reportPositions.length > 0) {
+    for (let i = 0; i < reportPositions.length; i++) {
+      const start = reportPositions[i].pos;
+      const end = i + 1 < reportPositions.length ? reportPositions[i + 1].pos : allText.length;
+      const section = allText.substring(start, end);
+      const num = reportPositions[i].num;
+
+      // Extract measurements from this section
+      const getVal = (pattern) => {
+        const m = section.match(pattern);
+        return m ? m[1] : '';
       };
 
-      buildings.push({
-        siteplanNum: num,
-        roofrNum: num,
-        phase: 1,
-        totalArea: getNum(/(?:Total\s*(?:Roof\s*)?Area|Area)[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        pitchedArea: getNum(/Pitched\s*Area[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        predominantPitch: (content.match(/Pitch[:\s]*([\d]+\/[\d]+)/i) || [])[1] || '4/12',
-        wastePercent: getNum(/Waste[:\s]*([0-9]+)/i) || 12,
-        eaves: getNum(/Eaves?[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        valleys: getNum(/Valley[s]?[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        hips: getNum(/Hips?[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        ridges: getNum(/Ridge[s]?[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        rakes: getNum(/Rake[s]?[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        wallFlashing: getNum(/Wall\s*Flash[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        stepFlashing: getNum(/Step\s*Flash[:\s]*([0-9,]+(?:\.\d+)?)/i),
-        pipes: getNum(/Pipe[s]?[:\s]*(\d+)/i),
-        dryerVents: getNum(/(?:Dryer\s*)?Vent[s]?[:\s]*(\d+)/i),
-      });
+      const totalArea = parseSqft(getVal(/Total\s*roof\s*area\s*[:\s]*([\d,]+(?:\.\d+)?)\s*(?:sqft|sq\s*ft|SF)?/i));
+      const pitchedArea = parseSqft(getVal(/Total\s*pitched\s*area\s*[:\s]*([\d,]+(?:\.\d+)?)/i));
+      const flatArea = parseSqft(getVal(/Total\s*flat\s*area\s*[:\s]*([\d,]+(?:\.\d+)?)/i));
+      const pitch = getVal(/(?:Predominant\s*)?[Pp]itch\s*[:\s]*(\d+\/\d+)/) || '4/12';
+
+      // Linear measurements in ft/in format
+      const eaves = parseFtIn(getVal(/Total\s*eaves?\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+      const valleys = parseFtIn(getVal(/Total\s*valleys?\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+      const hips = parseFtIn(getVal(/Total\s*hips?\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+      const ridges = parseFtIn(getVal(/Total\s*ridges?\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+      const rakes = parseFtIn(getVal(/Total\s*rakes?\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+      const wallFlashing = parseFtIn(getVal(/Total\s*wall\s*flashing\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+      const stepFlashing = parseFtIn(getVal(/Total\s*step\s*flashing\s*[:\s]*([\d,]+ft\s*\d*in)/i));
+
+      // If we got a valid area, this is a real building
+      if (totalArea > 0) {
+        buildings.push({
+          siteplanNum: String(num),
+          roofrNum: String(num),
+          phase: 1,
+          totalArea,
+          pitchedArea: pitchedArea || totalArea,
+          flatArea,
+          predominantPitch: pitch,
+          wastePercent: 12,
+          eaves, valleys, hips, ridges, rakes,
+          wallFlashing, stepFlashing,
+          pipes: 0,
+          dryerVents: 0,
+        });
+      }
     }
+  }
+
+  // If regex didn't find buildings, try alternate approach — look for area values near measurement labels
+  if (buildings.length === 0) {
+    // Try to find any building-like data patterns
+    const areaMatches = [...allText.matchAll(/(?:Total\s*roof\s*area|Area)[:\s]*([\d,]+(?:\.\d+)?)\s*(?:sqft|sq\s*ft|SF)/gi)];
+    areaMatches.forEach((m, idx) => {
+      buildings.push({
+        siteplanNum: String(idx + 1),
+        roofrNum: String(idx + 1),
+        phase: 1,
+        totalArea: parseFloat(m[1].replace(/,/g, '')),
+        pitchedArea: parseFloat(m[1].replace(/,/g, '')),
+        flatArea: 0,
+        predominantPitch: '4/12',
+        wastePercent: 12,
+        eaves: 0, valleys: 0, hips: 0, ridges: 0, rakes: 0,
+        wallFlashing: 0, stepFlashing: 0, pipes: 0, dryerVents: 0,
+      });
+    });
   }
 
   return { buildings, rawText: allText, pageCount: pdf.numPages };
 };
 
+/**
+ * Parse Beam AI Material Import Excel.
+ * Format: TAKEOFF sheet, header in row 2, Item in col B, Qty in col C, Unit in col D, Description in col G.
+ * Grouped by Roof Assembly sections separated by blank rows.
+ */
 export const parseBeamAIExcel = async (file) => {
   const XLSX = await import('xlsx');
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
   const materials = [];
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  // Use TAKEOFF sheet if available, otherwise first sheet
+  const sheetName = workbook.SheetNames.find(s => s.toUpperCase().includes('TAKEOFF')) || workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
   const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
+  // Find header row — look for "Item" in col B (index 1)
   let headerRow = 0;
   for (let i = 0; i < Math.min(data.length, 10); i++) {
-    const row = data[i];
-    if (row && row.some(cell => typeof cell === 'string' && (
-      cell.toLowerCase().includes('description') ||
-      cell.toLowerCase().includes('material') ||
-      cell.toLowerCase().includes('item') ||
-      cell.toLowerCase().includes('name')
-    ))) {
+    const row = data[i] || [];
+    if (row.some(cell => typeof cell === 'string' && cell.trim().toLowerCase() === 'item')) {
       headerRow = i;
       break;
     }
   }
 
-  const headers = (data[headerRow] || []).map(h => String(h || '').toLowerCase().trim());
-  const nameIdx = headers.findIndex(h => h.includes('description') || h.includes('material') || h.includes('item') || h.includes('name'));
-  const qtyIdx = headers.findIndex(h => h.includes('qty') || h.includes('quantity') || h.includes('count') || h.includes('amount'));
-  const unitIdx = headers.findIndex(h => h.includes('unit') || h.includes('uom'));
-  const costIdx = headers.findIndex(h => h.includes('cost') || h.includes('price') || h.includes('rate'));
-
+  // Beam AI format: col B=Item, col C=Qty1, col D=Unit1, col E=Qty2, col F=Unit2, col G=Description
   for (let i = headerRow + 1; i < data.length; i++) {
     const row = data[i];
-    if (!row || row.length === 0) continue;
-    const name = nameIdx >= 0 ? String(row[nameIdx] || '') : '';
-    if (!name || name.trim() === '') continue;
+    if (!row || row.length < 3) continue;
 
-    materials.push({
-      name: name.trim(),
-      quantity: qtyIdx >= 0 ? parseFloat(row[qtyIdx]) || 0 : 0,
-      unit: unitIdx >= 0 ? String(row[unitIdx] || '') : 'EA',
-      unitCost: costIdx >= 0 ? parseFloat(row[costIdx]) || 0 : 0,
-    });
+    // Item is in col B (index 1)
+    const name = row[1] ? String(row[1]).trim() : '';
+    if (!name) continue;
+
+    const qty = parseFloat(row[2]) || 0;
+    const unit = row[3] ? String(row[3]).trim() : 'EA';
+    const qty2 = parseFloat(row[4]) || 0;
+    const unit2 = row[5] ? String(row[5]).trim() : '';
+    const description = row[6] ? String(row[6]).trim() : '';
+
+    // Auto-match unit cost from TPO_UNIT_COSTS
+    let unitCost = 0;
+    const nameUpper = name.toUpperCase();
+    for (const [costKey, costData] of Object.entries(TPO_UNIT_COSTS)) {
+      if (nameUpper.includes(costKey) || costKey.includes(nameUpper)) {
+        unitCost = costData.cost;
+        break;
+      }
+    }
+
+    materials.push({ name, quantity: qty, unit, qty2, unit2, description, unitCost });
   }
 
   return { materials, sheetNames: workbook.SheetNames };
 };
 
+/**
+ * Parse Colony Roofers shingle spreadsheet (FL/GA format).
+ * Format: "1) Measurement Import" sheet has buildings starting row 2.
+ * Cols: Address, Total roof area, Total flat area, Total pitched area,
+ *       Two Story, Two Layer, Eaves, Valleys, Hips, Ridges, Rakes,
+ *       Wall Flashing, Step Flashing, Transitions, Parapet Wall, Unspecified
+ * Then pitch distribution columns follow.
+ */
 export const parseShingleExcel = async (file) => {
   const XLSX = await import('xlsx');
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
-  const result = { buildings: [], sheetNames: workbook.SheetNames };
+  const result = { buildings: [], sheetNames: workbook.SheetNames, jobName: '', companyName: '' };
 
-  const measureSheet = workbook.SheetNames.find(s =>
+  // Find measurement sheet
+  const measureSheetName = workbook.SheetNames.find(s =>
     s.toLowerCase().includes('measurement') || s.toLowerCase().includes('import')
   );
 
-  if (measureSheet) {
-    const sheet = workbook.Sheets[measureSheet];
+  if (measureSheetName) {
+    const sheet = workbook.Sheets[measureSheetName];
     const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-    let headerRow = 0;
-    for (let i = 0; i < Math.min(data.length, 10); i++) {
+    // Row 1 is header, data starts row 2
+    // Known column indices (0-based):
+    // 0=Address, 1=Total roof area, 2=Total flat area, 3=Total pitched area,
+    // 4=Two Story, 5=Two Layer, 6=Eaves, 7=Valleys, 8=Hips, 9=Ridges,
+    // 10=Rakes, 11=Wall Flashing, 12=Step Flashing, 13=Transitions,
+    // 14=Parapet Wall, 15=Unspecified
+    // Columns 16+ contain pitch distribution data
+
+    for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      if (row && row.some(cell => typeof cell === 'string' && (
-        cell.toLowerCase().includes('building') || cell.toLowerCase().includes('area')
-      ))) {
-        headerRow = i;
-        break;
+      if (!row || row.length < 7) continue;
+      const totalArea = parseFloat(row[1]) || 0;
+      if (totalArea === 0) continue;
+
+      // Extract building number from address (e.g., "... - Bldg 1 Roofr")
+      const address = String(row[0] || '');
+      const bldgMatch = address.match(/Bldg\s*(\d+)/i);
+      const bldgNum = bldgMatch ? bldgMatch[1] : String(result.buildings.length + 1);
+
+      // Find predominant pitch from pitch distribution columns (col 16+)
+      // These columns are labeled as pitch values like "0/12", then dates, then "1/12", "2/12", etc.
+      let predominantPitch = '4/12';
+      let maxPitchArea = 0;
+
+      // Check headers for pitch columns
+      const headers = data[0] || [];
+      for (let c = 16; c < headers.length; c++) {
+        const hdr = String(headers[c] || '');
+        const pitchMatch = hdr.match(/^(\d+)\/12$/);
+        if (pitchMatch && row[c]) {
+          const pitchArea = parseFloat(row[c]) || 0;
+          if (pitchArea > maxPitchArea) {
+            maxPitchArea = pitchArea;
+            predominantPitch = hdr;
+          }
+        }
       }
-    }
 
-    const headers = (data[headerRow] || []).map(h => String(h || '').toLowerCase().trim());
-
-    for (let i = headerRow + 1; i < data.length; i++) {
-      const row = data[i];
-      if (!row || row.length < 2) continue;
-
-      const getCol = (keywords) => {
-        const idx = headers.findIndex(h => keywords.some(k => h.includes(k)));
-        return idx >= 0 ? parseFloat(row[idx]) || 0 : 0;
-      };
-
-      const building = {
-        siteplanNum: String(row[0] || i - headerRow),
-        roofrNum: String(row[0] || i - headerRow),
+      result.buildings.push({
+        siteplanNum: bldgNum,
+        roofrNum: bldgNum,
         phase: 1,
-        totalArea: getCol(['total area', 'area', 'sqft', 'sq ft']),
-        pitchedArea: getCol(['pitched', 'area']),
-        predominantPitch: '4/12',
-        wastePercent: getCol(['waste']) || 12,
-        eaves: getCol(['eave']),
-        valleys: getCol(['valley']),
-        hips: getCol(['hip']),
-        ridges: getCol(['ridge']),
-        rakes: getCol(['rake']),
-        wallFlashing: getCol(['wall flash']),
-        stepFlashing: getCol(['step flash']),
-        pipes: getCol(['pipe']),
-        dryerVents: getCol(['dryer', 'vent']),
-      };
+        totalArea,
+        pitchedArea: parseFloat(row[3]) || totalArea,
+        flatArea: parseFloat(row[2]) || 0,
+        twoStory: row[4] ? true : false,
+        twoLayer: row[5] ? true : false,
+        predominantPitch,
+        wastePercent: 12,
+        eaves: parseFloat(row[6]) || 0,
+        valleys: parseFloat(row[7]) || 0,
+        hips: parseFloat(row[8]) || 0,
+        ridges: parseFloat(row[9]) || 0,
+        rakes: parseFloat(row[10]) || 0,
+        wallFlashing: parseFloat(row[11]) || 0,
+        stepFlashing: parseFloat(row[12]) || 0,
+        pipes: 0,
+        dryerVents: 0,
+      });
+    }
+  }
 
-      if (building.totalArea > 0) {
-        result.buildings.push(building);
-      }
+  // Try to get job info from Manual Inputs sheet
+  const manualSheet = workbook.SheetNames.find(s => s.toLowerCase().includes('manual'));
+  if (manualSheet) {
+    const sheet = workbook.Sheets[manualSheet];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    for (let i = 0; i < Math.min(data.length, 15); i++) {
+      const row = data[i] || [];
+      if (String(row[0] || '').toLowerCase().includes('company name')) result.companyName = String(row[1] || '');
+      if (String(row[0] || '').toLowerCase().includes('job name')) result.jobName = String(row[1] || '');
     }
   }
 

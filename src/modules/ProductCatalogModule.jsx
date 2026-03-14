@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { C, DEFAULT_SHINGLE_MATERIALS, generateId } from '../utils/constants';
 import { downloadCSV } from '../utils/helpers';
+import { useFirestoreCollection } from '../hooks/index';
 import DataTable from '../components/DataTable';
 
 export default function ProductCatalogModule() {
-  const [products, setProducts] = useState(DEFAULT_SHINGLE_MATERIALS);
+  const [products, setProducts] = useFirestoreCollection('products', DEFAULT_SHINGLE_MATERIALS);
   const [category, setCategory] = useState('all');
   const fileInputRef = useRef(null);
 
