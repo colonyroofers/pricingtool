@@ -157,7 +157,7 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
  * Calculate full estimate cost across all buildings with equipment split.
  * Equipment (forklift, dumpster, permit) is split evenly across buildings.
  */
-export const calculateEstimateCost = (buildings, materials, state, equipmentOverride, marginOverride) => {
+export const calculateEstimateCost = (buildings, materials, state, equipmentOverride, marginOverride, taxOverride) => {
   const stLabor = STATE_LABOR[state] || STATE_LABOR.FL;
   const stFin = STATE_FINANCIALS[state] || STATE_FINANCIALS.FL;
   const numBuildings = buildings.length || 1;
@@ -171,6 +171,9 @@ export const calculateEstimateCost = (buildings, materials, state, equipmentOver
   // Margin: use job-specific override if provided (as decimal, e.g. 0.30), else state default
   const marginRate = marginOverride != null ? marginOverride : stFin.margin;
 
+  // Tax: use job-specific override if provided (as decimal, e.g. 0.075), else state default
+  const taxRate = taxOverride != null ? taxOverride : stFin.taxRate;
+
   let grandMaterialCost = 0;
   let grandLaborCost = 0;
   let grandTearOffCost = 0;
@@ -179,12 +182,14 @@ export const calculateEstimateCost = (buildings, materials, state, equipmentOver
 
   const buildingResults = buildings.map(bldg => {
     const result = calculateBuildingCost(bldg, materials, stLabor, stFin, state);
+    // Recalculate tax if overridden
+    const bldgTax = taxOverride != null ? result.materialCost * taxRate : result.taxAmount;
     grandMaterialCost += result.materialCost;
     grandLaborCost += result.laborCost;
     grandTearOffCost += result.tearOffCost;
     grandWarrantyCost += result.warrantyCost;
-    grandTaxAmount += result.taxAmount;
-    return { ...result, equipmentCost: equipmentPerBuilding };
+    grandTaxAmount += bldgTax;
+    return { ...result, taxAmount: bldgTax, equipmentCost: equipmentPerBuilding };
   });
 
   const grandSubtotal = grandMaterialCost + grandLaborCost + grandTearOffCost + grandWarrantyCost + totalEquipment + grandTaxAmount;

@@ -53,6 +53,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const [jobPermitCost, setJobPermitCost] = useState(estimate?.jobPermitCost ?? 0);
   const defaultMargin = (STATE_FINANCIALS[estimate?.state || 'FL']?.margin ?? 0.25) * 100;
   const [jobMarginPercent, setJobMarginPercent] = useState(estimate?.jobMarginPercent ?? defaultMargin);
+  const defaultTaxRate = (STATE_FINANCIALS[estimate?.state || 'FL']?.taxRate ?? 0.075) * 100;
+  const [jobTaxPercent, setJobTaxPercent] = useState(estimate?.jobTaxPercent ?? defaultTaxRate);
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
@@ -126,6 +128,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       setJobPermitCost(estimate.jobPermitCost ?? 0);
       const stateMargin = (STATE_FINANCIALS[estimate.state || 'FL']?.margin ?? 0.25) * 100;
       setJobMarginPercent(estimate.jobMarginPercent ?? stateMargin);
+      const stateTax = (STATE_FINANCIALS[estimate.state || 'FL']?.taxRate ?? 0.075) * 100;
+      setJobTaxPercent(estimate.jobTaxPercent ?? stateTax);
       if (estimate.uploadedFiles?.length > 0) {
         setUploadedFiles(estimate.uploadedFiles);
         setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
@@ -465,6 +469,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         jobDumpsterCost,
         jobPermitCost,
         jobMarginPercent,
+        jobTaxPercent,
         updatedAt: new Date().toISOString(),
       };
       onSave(updated);
@@ -492,7 +497,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       return;
     }
     setHasUnsavedChanges(true);
-  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent]);
+  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent, jobTaxPercent]);
 
   // Warn before leaving if there are unsaved changes
   useEffect(() => {
@@ -526,7 +531,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
     // Use the new estimate-level calculator with job-specific equipment costs and margin
     const equipmentOverride = { forklift: jobForkliftCost, dumpster: jobDumpsterCost, permit: jobPermitCost };
     const marginDecimal = (jobMarginPercent || 25) / 100;
-    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride, marginDecimal);
+    const taxDecimal = (jobTaxPercent || 7.5) / 100;
+    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride, marginDecimal, taxDecimal);
     const rows = result.buildings.map((cost, i) => ({
       building: buildings[i]?.siteplanNum || String(i + 1),
       ...cost,
@@ -742,14 +748,14 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
               {(() => {
                 const tearOff = estimateType !== 'tile' ? laborSquares * stLabor.tearOffPerSquare : 0;
                 const warranty = estimateType !== 'tile' ? laborSquares * stLabor.warrantyPerSq : 0;
-                const bldgSubtotal = matTotal + laborCost + tearOff + warranty + matTotal * stFin.taxRate;
+                const bldgSubtotal = matTotal + laborCost + tearOff + warranty + matTotal * (jobTaxPercent / 100);
                 return (
                   <div style={{
                     backgroundColor: C.gray100, padding: '8px 16px',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}>
                     <span style={{ fontSize: 12, color: C.gray600 }}>
-                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost + tearOff)} · Warranty: {fmt(warranty)} · Tax ({(stFin.taxRate * 100).toFixed(1)}%): {fmt(matTotal * stFin.taxRate)}
+                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost + tearOff)} · Warranty: {fmt(warranty)} · Tax ({(jobTaxPercent || 7.5).toFixed(1)}%): {fmt(matTotal * (jobTaxPercent / 100))}
                     </span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
                       Subtotal: {fmt(bldgSubtotal)}
@@ -832,8 +838,16 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
               />
             </div>
             <div style={{ flex: '0 0 160px' }}>
-              <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Tax Rate</label>
-              <p style={{ fontSize: 13, color: C.gray700, margin: '8px 0' }}>{(stFin.taxRate * 100).toFixed(1)}% (state default)</p>
+              <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Tax Rate %</label>
+              <input
+                type="number"
+                min="0"
+                max="20"
+                step="0.1"
+                value={jobTaxPercent}
+                onChange={(e) => setJobTaxPercent(parseFloat(e.target.value) || 0)}
+                style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.gray300}`, borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+              />
             </div>
             <div style={{ flex: 1 }}>
               <span style={{ fontSize: 11, color: C.gray400 }}>
@@ -1208,7 +1222,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Forklift</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Dumpster</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Permit</th>
-                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tax ({(stFin.taxRate * 100).toFixed(1)}%)</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tax ({(jobTaxPercent || 7.5).toFixed(1)}%)</th>
                 {canViewMargin && (
                   <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Margin ({(jobMarginPercent || 25).toFixed(0)}%)</th>
                 )}
