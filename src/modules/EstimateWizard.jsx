@@ -56,6 +56,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const defaultTaxRate = (STATE_FINANCIALS[estimate?.state || 'FL']?.taxRate ?? 0.075) * 100;
   const [jobTaxPercent, setJobTaxPercent] = useState(estimate?.jobTaxPercent ?? defaultTaxRate);
   const [warrantyEnabled, setWarrantyEnabled] = useState(estimate?.warrantyEnabled !== false);
+  const [materialPriceOverrides, setMaterialPriceOverrides] = useState(estimate?.materialPriceOverrides || {});
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
@@ -132,6 +133,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       const stateTax = (STATE_FINANCIALS[estimate.state || 'FL']?.taxRate ?? 0.075) * 100;
       setJobTaxPercent(estimate.jobTaxPercent ?? stateTax);
       setWarrantyEnabled(estimate.warrantyEnabled !== false);
+      setMaterialPriceOverrides(estimate.materialPriceOverrides || {});
       if (estimate.uploadedFiles?.length > 0) {
         setUploadedFiles(estimate.uploadedFiles);
         setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
@@ -473,6 +475,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         jobMarginPercent,
         jobTaxPercent,
         warrantyEnabled,
+        materialPriceOverrides,
         updatedAt: new Date().toISOString(),
       };
       // Add audit trail entry directly to the updated object (don't call addAuditEntry
@@ -511,7 +514,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       return;
     }
     setHasUnsavedChanges(true);
-  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent, jobTaxPercent, warrantyEnabled]);
+  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent, jobTaxPercent, warrantyEnabled, materialPriceOverrides]);
 
   // Warn before leaving if there are unsaved changes
   useEffect(() => {
@@ -541,12 +544,27 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
 
   // ==================== COST CALCULATIONS ====================
 
+  // Build materials array with any per-job price overrides applied
+  const getEffectiveMaterials = () => {
+    if (!materialPriceOverrides || Object.keys(materialPriceOverrides).length === 0) {
+      return DEFAULT_SHINGLE_MATERIALS;
+    }
+    return DEFAULT_SHINGLE_MATERIALS.map(m => {
+      const override = materialPriceOverrides[m.id];
+      if (override != null) {
+        return { ...m, prices: { ...m.prices, [marketState]: override } };
+      }
+      return m;
+    });
+  };
+
   const getShingleCosts = () => {
     // Use the new estimate-level calculator with job-specific equipment costs and margin
     const equipmentOverride = { forklift: jobForkliftCost, dumpster: jobDumpsterCost, permit: jobPermitCost };
     const marginDecimal = (jobMarginPercent || 25) / 100;
     const taxDecimal = (jobTaxPercent || 7.5) / 100;
-    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride, marginDecimal, taxDecimal, warrantyEnabled);
+    const effectiveMaterials = getEffectiveMaterials();
+    const result = calculateEstimateCost(buildings, effectiveMaterials, marketState, equipmentOverride, marginDecimal, taxDecimal, warrantyEnabled, materialPriceOverrides);
     const rows = result.buildings.map((cost, i) => ({
       building: buildings[i]?.siteplanNum || String(i + 1),
       ...cost,
@@ -612,9 +630,47 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       );
     }
 
-    const materials = DEFAULT_SHINGLE_MATERIALS;
+    const materials = getEffectiveMaterials();
     const stLabor = STATE_LABOR[marketState] || STATE_LABOR.FL;
     const stFin = STATE_FINANCIALS[marketState] || STATE_FINANCIALS.FL;
+
+    // Build the list of material items for the editable price table (filtered by state)
+    const editableMaterialItems = DEFAULT_SHINGLE_MATERIALS
+      .filter(m => !(m.stateExclude && m.stateExclude.includes(marketState)))
+      .map(m => ({
+        id: m.id,
+        name: m.name,
+        unit: m.unit,
+        defaultPrice: m.prices[marketState] || 0,
+        currentPrice: materialPriceOverrides[m.id] ?? m.prices[marketState] ?? 0,
+      }));
+    // Add OSB and Labor as editable rows
+    const laborItem = {
+      id: 'labor',
+      name: 'Install Labor (per SQ)',
+      unit: 'SQ',
+      defaultPrice: stLabor.laborPerSquare,
+      currentPrice: materialPriceOverrides['labor'] ?? stLabor.laborPerSquare,
+    };
+    const osbItem = {
+      id: 'osb',
+      name: 'OSB Decking',
+      unit: 'SHT',
+      defaultPrice: stLabor.osbPerSheet,
+      currentPrice: materialPriceOverrides['osb'] ?? stLabor.osbPerSheet,
+    };
+    const warrantyItem = {
+      id: 'warranty',
+      name: 'Warranty (per SQ)',
+      unit: 'SQ',
+      defaultPrice: stLabor.warrantyPerSq,
+      currentPrice: materialPriceOverrides['warranty'] ?? stLabor.warrantyPerSq,
+    };
+
+    // Effective labor/osb/warranty prices (with overrides)
+    const effLaborPerSq = materialPriceOverrides['labor'] ?? stLabor.laborPerSquare;
+    const effOsbPerSheet = materialPriceOverrides['osb'] ?? stLabor.osbPerSheet;
+    const effWarrantyPerSq = materialPriceOverrides['warranty'] ?? stLabor.warrantyPerSq;
 
     // Material row definitions matching spreadsheet "Total Cost Calc" tab
     const getMaterialRows = (qty, state) => {
@@ -645,7 +701,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       rows.push(
         { name: 'Touch Paint', qty: qty.touchPaint, unit: 'EA', price: prices.m14 },
         { name: 'NP1', qty: qty.np1, unit: 'EA', price: prices.m15 },
-        { name: 'OSB Decking (5% est.)', qty: qty.osbSheets, unit: 'SHT', price: stLabor.osbPerSheet },
+        { name: 'OSB Decking (5% est.)', qty: qty.osbSheets, unit: 'SHT', price: effOsbPerSheet },
       );
       return rows;
     };
@@ -666,6 +722,65 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {/* ── Editable Unit Costs ── */}
+        {estimateType === 'shingle' && (
+          <div style={{ border: `1px solid ${C.gray200}`, borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ backgroundColor: C.navy, padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.white }}>Unit Costs — {marketState}</span>
+              {Object.keys(materialPriceOverrides).length > 0 && (
+                <button
+                  onClick={() => setMaterialPriceOverrides({})}
+                  style={{ fontSize: 11, color: C.gray300, backgroundColor: 'transparent', border: `1px solid ${C.gray400}`, borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}
+                >
+                  Reset to Defaults
+                </button>
+              )}
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: C.gray50 }}>
+                    <th style={thStyle}>Item</th>
+                    <th style={{ ...thStyle, textAlign: 'center', width: 60 }}>Unit</th>
+                    <th style={{ ...thStyle, textAlign: 'right', width: 100 }}>Default</th>
+                    <th style={{ ...thStyle, textAlign: 'right', width: 120 }}>Unit Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...editableMaterialItems, osbItem, laborItem, ...(warrantyEnabled ? [warrantyItem] : [])].map((item) => {
+                    const isOverridden = materialPriceOverrides[item.id] != null && materialPriceOverrides[item.id] !== item.defaultPrice;
+                    return (
+                      <tr key={item.id} style={{ borderBottom: `1px solid ${C.gray200}`, backgroundColor: isOverridden ? '#FFFDE7' : C.white }}>
+                        <td style={tdStyle}>{item.name}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>{item.unit}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', color: C.gray400, fontSize: 12 }}>{fmt(item.defaultPrice)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', padding: '4px 8px' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={item.currentPrice}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setMaterialPriceOverrides(prev => ({ ...prev, [item.id]: val }));
+                            }}
+                            style={{
+                              width: 90, padding: '5px 8px', textAlign: 'right',
+                              border: `1px solid ${isOverridden ? '#F59E0B' : C.gray300}`,
+                              borderRadius: 4, fontSize: 13, boxSizing: 'border-box',
+                              backgroundColor: isOverridden ? '#FFFDE7' : C.white,
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>
             {estimateType === 'tile' ? 'Tile' : 'Shingle'} Calculations — Building by Building
@@ -688,7 +803,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
           } else {
             // Labor uses pitched area with NO waste for all states
             laborSquares = Math.ceil((bldg.pitchedArea || bldg.totalArea) / 100);
-            laborCost = laborSquares * stLabor.laborPerSquare;
+            laborCost = laborSquares * effLaborPerSq;
           }
 
           return (
@@ -731,19 +846,19 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                   ))}
                   {/* Labor rows */}
                   <tr style={{ backgroundColor: C.blueBg, borderTop: `2px solid ${C.gray300}` }}>
-                    <td style={tdStyle}>Install Labor ({laborSquares} SQ × {fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}/SQ)</td>
+                    <td style={tdStyle}>Install Labor ({laborSquares} SQ × {fmt(estimateType === 'tile' ? 185 : effLaborPerSq)}/SQ)</td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
                     <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(estimateType === 'tile' ? 185 : effLaborPerSq)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborCost)}</td>
                   </tr>
                   {estimateType !== 'tile' && warrantyEnabled && (
                     <tr style={{ backgroundColor: C.blueBg }}>
-                      <td style={tdStyle}>Warranty ({laborSquares} SQ × {fmt(stLabor.warrantyPerSq)}/SQ)</td>
+                      <td style={tdStyle}>Warranty ({laborSquares} SQ × {fmt(effWarrantyPerSq)}/SQ)</td>
                       <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
                       <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
-                      <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(stLabor.warrantyPerSq)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborSquares * stLabor.warrantyPerSq)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(effWarrantyPerSq)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborSquares * effWarrantyPerSq)}</td>
                     </tr>
                   )}
                 </tbody>
@@ -751,7 +866,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
 
               {/* Building subtotal */}
               {(() => {
-                const warranty = (estimateType !== 'tile' && warrantyEnabled) ? laborSquares * stLabor.warrantyPerSq : 0;
+                const warranty = (estimateType !== 'tile' && warrantyEnabled) ? laborSquares * effWarrantyPerSq : 0;
                 const bldgSubtotal = matTotal + laborCost + warranty + matTotal * (jobTaxPercent / 100);
                 return (
                   <div style={{

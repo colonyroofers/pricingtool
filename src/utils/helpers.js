@@ -83,10 +83,11 @@ export const calculateShingleMaterials = (building, materials, state) => {
  * Equipment costs (forklift, dumpster, permit) are NOT included per-building —
  * they are split evenly across all buildings at the estimate level.
  */
-export const calculateBuildingCost = (building, materials, labor, financials, state) => {
+export const calculateBuildingCost = (building, materials, labor, financials, state, priceOverrides) => {
   // Use state-specific config, falling back to passed-in values
   const stLabor = STATE_LABOR[state] || labor;
   const stFin = STATE_FINANCIALS[state] || financials;
+  const po = priceOverrides || {};
 
   const qty = calculateShingleMaterials(building, materials, state);
 
@@ -122,10 +123,11 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
     lineItems.push({ id: 'm13', name: 'Roof Cement', qty: qty.roofCement, price: prices.m13 || 8 });
   }
 
+  const effOsb = po.osb ?? stLabor.osbPerSheet;
   lineItems.push(
     { id: 'm14', name: 'Touch Paint', qty: qty.touchPaint, price: prices.m14 || 7.25 },
     { id: 'm15', name: 'NP1', qty: qty.np1, price: prices.m15 || 8 },
-    { id: 'osb', name: 'OSB Decking (5% est.)', qty: qty.osbSheets, price: stLabor.osbPerSheet },
+    { id: 'osb', name: 'OSB Decking (5% est.)', qty: qty.osbSheets, price: effOsb },
   );
 
   const materialCost = lineItems.reduce((sum, li) => sum + (li.qty * li.price), 0);
@@ -133,10 +135,12 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
   // Labor — pitched area with NO waste for all states
   const { totalArea = 0, pitchedArea = 0 } = building;
   const laborSquares = Math.ceil((pitchedArea || totalArea) / 100);
-  const laborCost = laborSquares * stLabor.laborPerSquare;
+  const effLabor = po.labor ?? stLabor.laborPerSquare;
+  const laborCost = laborSquares * effLabor;
   // Tearoff is included in install labor — not a separate cost
   const tearOffCost = 0;
-  const warrantyCost = laborSquares * stLabor.warrantyPerSq;
+  const effWarranty = po.warranty ?? stLabor.warrantyPerSq;
+  const warrantyCost = laborSquares * effWarranty;
 
   // Tax on materials only
   const taxAmount = materialCost * stFin.taxRate;
@@ -158,7 +162,7 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
  * Calculate full estimate cost across all buildings with equipment split.
  * Equipment (forklift, dumpster, permit) is split evenly across buildings.
  */
-export const calculateEstimateCost = (buildings, materials, state, equipmentOverride, marginOverride, taxOverride, warrantyEnabled = true) => {
+export const calculateEstimateCost = (buildings, materials, state, equipmentOverride, marginOverride, taxOverride, warrantyEnabled = true, priceOverrides) => {
   const stLabor = STATE_LABOR[state] || STATE_LABOR.FL;
   const stFin = STATE_FINANCIALS[state] || STATE_FINANCIALS.FL;
   const numBuildings = buildings.length || 1;
@@ -182,7 +186,7 @@ export const calculateEstimateCost = (buildings, materials, state, equipmentOver
   let grandTaxAmount = 0;
 
   const buildingResults = buildings.map(bldg => {
-    const result = calculateBuildingCost(bldg, materials, stLabor, stFin, state);
+    const result = calculateBuildingCost(bldg, materials, stLabor, stFin, state, priceOverrides);
     // Recalculate tax if overridden
     const bldgTax = taxOverride != null ? result.materialCost * taxRate : result.taxAmount;
     grandMaterialCost += result.materialCost;
