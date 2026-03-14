@@ -146,7 +146,7 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                   >
                     <div
                       onClick={() => onCardClick(estimate)}
-                      style={{ cursor: 'pointer', pointerEvents: 'none' }}
+                      style={{ cursor: 'pointer' }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                         <h4 style={{ fontSize: 13, fontWeight: 600, color: C.navy, margin: 0, flex: 1, pointerEvents: 'none' }}>
