@@ -776,9 +776,42 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
     // Shingle or Tile pricing
     const costData = estimateType === 'tile' ? getTileCosts() : getShingleCosts();
+    const stLabor = STATE_LABOR[marketState] || STATE_LABOR.GA;
+    const stFin = STATE_FINANCIALS[marketState] || STATE_FINANCIALS.GA;
+    const numBldgs = buildings.length || 1;
+    const forkliftPer = stLabor.forkliftCost / numBldgs;
+    const dumpsterPer = stLabor.dumpsterCost / numBldgs;
+    const permitPer = stLabor.permitCost / numBldgs;
+
+    // Build rows with all columns
+    const pricingRows = costData.rows.map(row => {
+      const bldgSubtotal = (row.materialCost || 0) + (row.laborCost || 0) + (row.tearOffCost || 0)
+        + (row.warrantyCost || 0) + forkliftPer + dumpsterPer + permitPer + (row.taxAmount || 0);
+      const bldgMargin = bldgSubtotal / (1 - stFin.margin) - bldgSubtotal;
+      const bldgTotal = bldgSubtotal + bldgMargin;
+      return { ...row, forklift: forkliftPer, dumpster: dumpsterPer, permit: permitPer, margin: bldgMargin, bldgTotal };
+    });
+
+    // Column totals
+    const colTotals = {
+      materialCost: pricingRows.reduce((s, r) => s + (r.materialCost || 0), 0),
+      laborCost: pricingRows.reduce((s, r) => s + (r.laborCost || 0), 0),
+      tearOffCost: pricingRows.reduce((s, r) => s + (r.tearOffCost || 0), 0),
+      warrantyCost: pricingRows.reduce((s, r) => s + (r.warrantyCost || 0), 0),
+      forklift: pricingRows.reduce((s, r) => s + r.forklift, 0),
+      dumpster: pricingRows.reduce((s, r) => s + r.dumpster, 0),
+      permit: pricingRows.reduce((s, r) => s + r.permit, 0),
+      taxAmount: pricingRows.reduce((s, r) => s + (r.taxAmount || 0), 0),
+      margin: pricingRows.reduce((s, r) => s + r.margin, 0),
+      bldgTotal: pricingRows.reduce((s, r) => s + r.bldgTotal, 0),
+    };
+
+    const ssCellR = { ...tdStyle, textAlign: 'right', padding: '6px 10px', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap' };
+    const ssHead = { ...thStyle, textAlign: 'right', padding: '8px 10px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '0.02em' };
+    const ssHeadL = { ...ssHead, textAlign: 'left' };
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>
           {estimateType === 'tile' ? 'Tile' : 'Shingle'} Pricing
         </h3>
@@ -790,39 +823,64 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
           </div>
         )}
 
-        <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: C.white, border: `1px solid ${C.gray200}`, borderRadius: 8, overflow: 'hidden' }}>
-          <thead>
-            <tr style={{ backgroundColor: C.gray50 }}>
-              <th style={thStyle}>Building</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Material</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Install</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Tearoff</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Warranty</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {costData.rows.map((row, i) => (
-              <tr key={i} style={{ backgroundColor: i % 2 === 0 ? C.white : C.gray50, borderBottom: `1px solid ${C.gray200}` }}>
-                <td style={tdStyle}>Building {row.building}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.materialCost)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.laborCost)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.tearOffCost || 0)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.warrantyCost || 0)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.equipmentCost || 0)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: C.navy }}>{fmt(row.total)}</td>
+        <div style={{ overflowX: 'auto', border: `1px solid ${C.gray300}`, borderRadius: 6, backgroundColor: C.white }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
+            <thead>
+              <tr style={{ backgroundColor: C.navy }}>
+                <th style={{ ...ssHeadL, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Building</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Material</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Install</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tearoff</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Warranty</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Forklift</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Dumpster</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Permit</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tax ({(stFin.taxRate * 100).toFixed(1)}%)</th>
+                <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Margin ({(stFin.margin * 100).toFixed(0)}%)</th>
+                <th style={{ ...ssHead, color: C.white }}>Total</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pricingRows.map((row, i) => (
+                <tr key={i} style={{ backgroundColor: i % 2 === 0 ? C.white : C.gray50, borderBottom: `1px solid ${C.gray200}` }}>
+                  <td style={{ ...tdStyle, padding: '6px 10px', fontSize: 12, fontWeight: 500, borderRight: `1px solid ${C.gray200}` }}>Bldg {row.building}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.materialCost)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.laborCost)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.tearOffCost || 0)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.warrantyCost || 0)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.forklift)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.dumpster)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.permit)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.taxAmount || 0)}</td>
+                  <td style={{ ...ssCellR, borderRight: `1px solid ${C.gray200}` }}>{fmt(row.margin)}</td>
+                  <td style={{ ...ssCellR, fontWeight: 700, color: C.navy }}>{fmt(row.bldgTotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ backgroundColor: C.navy, borderTop: `2px solid ${C.navyDark}` }}>
+                <td style={{ padding: '10px 10px', fontSize: 12, fontWeight: 700, color: C.white }}>TOTALS</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.materialCost)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.laborCost)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.tearOffCost)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.warrantyCost)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.forklift)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.dumpster)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.permit)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.taxAmount)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.white }}>{fmt(colTotals.margin)}</td>
+                <td style={{ ...ssCellR, fontWeight: 700, color: C.red, fontSize: 13 }}>{fmt(colTotals.bldgTotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
 
         <div style={{
           backgroundColor: C.gray100, padding: 16, borderRadius: 8,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>Total Project Cost (with margin & tax):</span>
-          <span style={{ fontSize: 22, fontWeight: 700, color: C.red }}>{fmtInt(costData.total)}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>Total Project Cost:</span>
+          <span style={{ fontSize: 22, fontWeight: 700, color: C.red }}>{fmtInt(colTotals.bldgTotal)}</span>
         </div>
       </div>
     );
