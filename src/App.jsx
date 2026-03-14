@@ -134,6 +134,9 @@ export default function App() {
     handleAddEstimate(duplicated);
   };
 
+  // Role-based margin visibility (must be before any conditional returns)
+  const canViewMargin = useMemo(() => MARGIN_VISIBLE_ROLES.includes(currentUser.role), [currentUser.role]);
+
   const renderModule = () => {
     switch (activeNav) {
       case 'dashboard':
@@ -327,9 +330,6 @@ export default function App() {
   }
 
   const navItem = NAV_ITEMS.find(n => n.key === activeNav);
-
-  // Role-based margin visibility
-  const canViewMargin = useMemo(() => MARGIN_VISIBLE_ROLES.includes(currentUser.role), [currentUser.role]);
 
   return (
     <ToastProvider>
