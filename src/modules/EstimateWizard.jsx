@@ -880,6 +880,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
           const equipPermit = jobPermitCost || 0;
           const totalEquip = equipForklift + equipDumpster + equipPermit;
           const equipPerBldg = totalEquip / numBldgs;
+          const marginRate = (jobMarginPercent || 25) / 100;
 
           return (
             <div style={{ border: `1px solid ${C.gray200}`, borderRadius: 8, overflow: 'hidden' }}>
@@ -889,7 +890,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 </span>
               </div>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
                   <thead>
                     <tr style={{ backgroundColor: C.gray50 }}>
                       <th style={thStyle}>Bldg</th>
@@ -899,12 +900,19 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                       <th style={{ ...thStyle, textAlign: 'right' }}>Warranty</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Tax</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
-                      <th style={{ ...thStyle, textAlign: 'right', fontWeight: 700 }}>Subtotal</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Subtotal</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Margin</th>
+                      <th style={{ ...thStyle, textAlign: 'right', fontWeight: 700 }}>Total</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>$/SQ</th>
                     </tr>
                   </thead>
                   <tbody>
                     {summary.buildings.map((b, i) => {
                       const bldgSub = b.materialCost + b.laborCost + b.tearOffCost + b.warrantyCost + b.taxAmount + equipPerBldg;
+                      const bldgMargin = bldgSub / (1 - marginRate) - bldgSub;
+                      const bldgTotal = bldgSub + bldgMargin;
+                      const bldgSquares = Math.ceil((buildings[i]?.pitchedArea || buildings[i]?.totalArea || 1) / 100);
+                      const pricePerSq = bldgTotal / bldgSquares;
                       return (
                         <tr key={i} style={{ backgroundColor: i % 2 === 0 ? C.white : C.gray50, borderBottom: `1px solid ${C.gray200}` }}>
                           <td style={tdStyle}>{buildings[i]?.siteplanNum || i + 1}</td>
@@ -914,15 +922,18 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.warrantyCost)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.taxAmount)}</td>
                           <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(equipPerBldg)}</td>
-                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(bldgSub)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(bldgSub)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', color: '#E65100' }}>{fmt(bldgMargin)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(bldgTotal)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontSize: 11 }}>{fmt(pricePerSq)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                   <tfoot>
-                    {/* Subtotal row */}
+                    {/* Totals row */}
                     <tr style={{ backgroundColor: C.gray100, borderTop: `2px solid ${C.gray300}` }}>
-                      <td style={{ ...tdStyle, fontWeight: 700 }}>Subtotal</td>
+                      <td style={{ ...tdStyle, fontWeight: 700 }}>Totals</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalMaterial)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalLabor)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalTearOff)}</td>
@@ -930,28 +941,22 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalTax)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(totalEquip)}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(summary.grandTotal - summary.totalMargin)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#E65100' }}>{fmt(summary.totalMargin)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(summary.grandTotal)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 11 }}>{(() => {
+                        const totalSQ = buildings.reduce((s, bl) => s + Math.ceil((bl.pitchedArea || bl.totalArea || 1) / 100), 0);
+                        return fmt(summary.grandTotal / totalSQ);
+                      })()}</td>
                     </tr>
                     {/* Equipment breakdown */}
                     {totalEquip > 0 && (
                       <tr style={{ backgroundColor: C.gray50 }}>
-                        <td colSpan={5} style={{ ...tdStyle, fontSize: 11, color: C.gray500 }}>
+                        <td colSpan={7} style={{ ...tdStyle, fontSize: 11, color: C.gray500 }}>
                           Equipment: Forklift {fmt(equipForklift)} · Dumpster {fmt(equipDumpster)} · Permit {fmt(equipPermit)}
                         </td>
-                        <td colSpan={3} />
+                        <td colSpan={4} />
                       </tr>
                     )}
-                    {/* Margin row */}
-                    <tr style={{ backgroundColor: '#FFF8E1' }}>
-                      <td style={{ ...tdStyle, fontWeight: 700 }}>Margin ({jobMarginPercent}%)</td>
-                      <td colSpan={6} />
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#E65100' }}>{fmt(summary.totalMargin)}</td>
-                    </tr>
-                    {/* Grand total */}
-                    <tr style={{ backgroundColor: C.navy }}>
-                      <td style={{ ...tdStyle, fontWeight: 700, color: C.white, fontSize: 14 }}>Grand Total</td>
-                      <td colSpan={6} />
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.white, fontSize: 14 }}>{fmt(summary.grandTotal)}</td>
-                    </tr>
                   </tfoot>
                 </table>
               </div>
