@@ -27,7 +27,9 @@ const DEMO_BUILDINGS = [
 ];
 
 export default function EstimateWizard({ estimate, onSave, onClose, currentUser, canViewMargin }) {
+  const { showToast } = useToast();
   const [step, setStep] = useState(1);
+  const [saveConfirmation, setSaveConfirmation] = useState(null);
   const [buildings, setBuildings] = useState(estimate?.buildings?.length > 0 ? estimate.buildings : []);
   const [tpoMaterials, setTpoMaterials] = useState(estimate?.tpoMaterials || []);
   const [marketState, setMarketState] = useState(estimate?.state || 'FL');
@@ -445,13 +447,6 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const handleSave = async () => {
     if (isSubmitting) return;
 
-    // Validate form before save
-    const errors = validateForm();
-    if (Object.keys(errors).length > 0) {
-      alert('Please fill in all required fields before saving.');
-      return;
-    }
-
     setIsSubmitting(true);
     try {
       const totalCost = getTotalCost();
@@ -459,7 +454,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       const cleanFiles = uploadedFiles.map(({ data, ...rest }) => rest);
       const updated = {
         ...(estimate || { id: estimateId, status: 'unassigned', createdAt: new Date().toISOString() }),
-        propertyName: estimateName,
+        propertyName: estimateName || 'Untitled Estimate',
         state: marketState,
         type: estimateType,
         buildings,
@@ -475,6 +470,13 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       onSave(updated);
       setHasUnsavedChanges(false);
       addAuditEntry('estimate_saved', `Estimate saved with total cost ${totalCost}`);
+
+      // Show save confirmation
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      setSaveConfirmation(`Estimate saved at ${timeStr}`);
+      showToast?.(`Estimate saved successfully`);
+      setTimeout(() => setSaveConfirmation(null), 4000);
     } catch (err) {
       console.error('Save error:', err);
       alert('Error saving estimate: ' + err.message);
@@ -1633,6 +1635,22 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         {step === 4 && renderStep3()}
         {step === 5 && renderStep4()}
       </div>
+
+      {/* Save confirmation banner */}
+      {saveConfirmation && (
+        <div style={{
+          padding: '10px 24px',
+          backgroundColor: '#D1FAE5',
+          borderTop: `1px solid #10B981`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          animation: 'fadeIn 0.2s ease-in',
+        }}>
+          <span style={{ fontSize: 16 }}>✓</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#065F46' }}>{saveConfirmation}</span>
+        </div>
+      )}
 
       {/* Footer Nav */}
       <div style={{
