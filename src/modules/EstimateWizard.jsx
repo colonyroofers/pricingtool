@@ -46,6 +46,9 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
+  const [jobForkliftCost, setJobForkliftCost] = useState(estimate?.jobForkliftCost ?? 0);
+  const [jobDumpsterCost, setJobDumpsterCost] = useState(estimate?.jobDumpsterCost ?? 0);
+  const [jobPermitCost, setJobPermitCost] = useState(estimate?.jobPermitCost ?? 0);
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
@@ -114,6 +117,9 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       setEstimateType(estimate.type || 'shingle');
       if (estimate.buildings?.length > 0) setBuildings(estimate.buildings);
       if (estimate.tpoMaterials?.length > 0) setTpoMaterials(estimate.tpoMaterials);
+      setJobForkliftCost(estimate.jobForkliftCost ?? 0);
+      setJobDumpsterCost(estimate.jobDumpsterCost ?? 0);
+      setJobPermitCost(estimate.jobPermitCost ?? 0);
       if (estimate.uploadedFiles?.length > 0) {
         setUploadedFiles(estimate.uploadedFiles);
         setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
@@ -456,6 +462,9 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         tpoMaterials,
         uploadedFiles: cleanFiles,
         totalCost,
+        jobForkliftCost,
+        jobDumpsterCost,
+        jobPermitCost,
         updatedAt: new Date().toISOString(),
       };
       onSave(updated);
@@ -476,7 +485,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       return;
     }
     setHasUnsavedChanges(true);
-  }, [buildings, tpoMaterials, estimateName, marketState, estimateType]);
+  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost]);
 
   // Warn before leaving if there are unsaved changes
   useEffect(() => {
@@ -507,8 +516,9 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   // ==================== COST CALCULATIONS ====================
 
   const getShingleCosts = () => {
-    // Use the new estimate-level calculator that handles equipment splitting
-    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState);
+    // Use the new estimate-level calculator with job-specific equipment costs
+    const equipmentOverride = { forklift: jobForkliftCost, dumpster: jobDumpsterCost, permit: jobPermitCost };
+    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride);
     const rows = result.buildings.map((cost, i) => ({
       building: buildings[i]?.siteplanNum || String(i + 1),
       ...cost,
@@ -648,12 +658,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
             laborSquares = Math.ceil(sq);
             laborCost = sq * 185;
           } else {
-            const waste = (bldg.wastePercent || 12) / 100;
-            if (stLabor.laborBasis === 'total') {
-              laborSquares = Math.ceil(bldg.totalArea / 100);
-            } else {
-              laborSquares = Math.ceil((bldg.pitchedArea || bldg.totalArea) * (1 + waste) / 100);
-            }
+            // Labor uses pitched area with NO waste for all states
+            laborSquares = Math.ceil((bldg.pitchedArea || bldg.totalArea) / 100);
             laborCost = laborSquares * stLabor.laborPerSquare;
           }
 
@@ -747,20 +753,51 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
           );
         })}
 
-        {/* Equipment & Grand total summary */}
+        {/* Equipment costs — per-job, manually entered */}
         {estimateType !== 'tile' && (
           <div style={{
             backgroundColor: C.gray100, padding: 16, borderRadius: 8,
             border: `1px solid ${C.gray200}`,
           }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 8 }}>
-              Equipment Costs (split across {buildings.length} building{buildings.length !== 1 ? 's' : ''})
+            <p style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 12 }}>
+              Equipment &amp; Job Costs (enter per job)
             </p>
-            <div style={{ display: 'flex', gap: 20, fontSize: 12, color: C.gray600 }}>
-              <span>Forklift: {fmt(stLabor.forkliftCost)}</span>
-              <span>Dumpster: {fmt(stLabor.dumpsterCost)}</span>
-              <span>Permit: {fmt(stLabor.permitCost)}</span>
-              <span style={{ fontWeight: 600 }}>Total: {fmt(stLabor.forkliftCost + stLabor.dumpsterCost + stLabor.permitCost)}</span>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 140px' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Forklift</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={jobForkliftCost}
+                  onChange={(e) => setJobForkliftCost(parseFloat(e.target.value) || 0)}
+                  style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.gray300}`, borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ flex: '1 1 140px' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Dumpster</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={jobDumpsterCost}
+                  onChange={(e) => setJobDumpsterCost(parseFloat(e.target.value) || 0)}
+                  style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.gray300}`, borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ flex: '1 1 140px' }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Permit</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={jobPermitCost}
+                  onChange={(e) => setJobPermitCost(parseFloat(e.target.value) || 0)}
+                  style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.gray300}`, borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ flex: '1 1 140px', display: 'flex', alignItems: 'flex-end' }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: C.navy, margin: '0 0 8px' }}>
+                  Total: {fmt(jobForkliftCost + jobDumpsterCost + jobPermitCost)}
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -1041,9 +1078,9 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
     const stLabor = STATE_LABOR[marketState] || STATE_LABOR.GA;
     const stFin = STATE_FINANCIALS[marketState] || STATE_FINANCIALS.GA;
     const numBldgs = buildings.length || 1;
-    const forkliftPer = stLabor.forkliftCost / numBldgs;
-    const dumpsterPer = stLabor.dumpsterCost / numBldgs;
-    const permitPer = stLabor.permitCost / numBldgs;
+    const forkliftPer = jobForkliftCost / numBldgs;
+    const dumpsterPer = jobDumpsterCost / numBldgs;
+    const permitPer = jobPermitCost / numBldgs;
 
     // Build rows with all columns
     const pricingRows = costData.rows.map(row => {

@@ -25,7 +25,7 @@ export default function DataTable({ columns, data, onDataChange, searchable = tr
     const newData = [...data];
     newData[rowIndex] = { ...newData[rowIndex], [colKey]: finalValue };
     onDataChange(newData);
-    setEditingCell(null);
+    // Don't close editing here — let onBlur handle that
   };
 
   const formatValue = (val, col) => {
