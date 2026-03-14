@@ -29,7 +29,7 @@ export const calculateShingleMaterials = (building, materials, state) => {
   // m4: Synthetic Underlayment — differs by state
   // FL: ROUNDUP(totalArea / 950, 0) * 2 rolls (doubled)
   // GA: ROUNDUP(totalArea / 950, 0) rolls (single layer)
-  const syntheticRolls = state === 'GA' || state === 'TN'
+  const syntheticRolls = state !== 'FL'
     ? Math.ceil(totalArea / 950)
     : Math.ceil(totalArea / 950) * 2;
 
@@ -40,7 +40,7 @@ export const calculateShingleMaterials = (building, materials, state) => {
   const ridgeVentCount = Math.ceil(ridges / 4);
 
   // m7: Off-Ridge Vents — FL only (count from measurement data); GA excludes this
-  const offRidgeVents = (state === 'GA' || state === 'TN') ? 0 : (building.offRidgeVents || 0);
+  const offRidgeVents = (state !== 'FL') ? 0 : (building.offRidgeVents || 0);
 
   // m8: Step Flashing — ROUNDUP(stepFlashing / 60, 0) boxes
   const stepFlashingBoxes = Math.ceil(stepFlashing / 60);
@@ -58,7 +58,7 @@ export const calculateShingleMaterials = (building, materials, state) => {
   const pipeBoots = pipes;
 
   // m13: Roof Cement — FL only: ROUNDUP((eaves + rakes) / 100, 0) buckets; GA excludes this
-  const roofCement = (state === 'GA' || state === 'TN') ? 0 : Math.ceil((eaves + rakes) / 100);
+  const roofCement = (state !== 'FL') ? 0 : Math.ceil((eaves + rakes) / 100);
 
   // m14: Touch Paint — pipe count
   const touchPaint = pipes;
@@ -101,8 +101,8 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
     { id: 'm6', name: 'Ridge Vent', qty: qty.ridgeVentCount, price: prices.m6 || 7 },
   ];
 
-  // Off-Ridge Vents — FL/TX/TN only
-  if (state !== 'GA' && state !== 'TN') {
+  // Off-Ridge Vents — FL only
+  if (state === 'FL') {
     lineItems.push({ id: 'm7', name: 'Off-Ridge Vents', qty: qty.offRidgeVents, price: prices.m7 || 80 });
   }
 
@@ -114,8 +114,8 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
     { id: 'm12', name: 'Pipe Boots', qty: qty.pipeBoots, price: prices.m12 || 4.75 },
   );
 
-  // Roof Cement — FL/TX only (GA excludes this)
-  if (state !== 'GA' && state !== 'TN') {
+  // Roof Cement — FL only (GA/TX/TN exclude this)
+  if (state === 'FL') {
     lineItems.push({ id: 'm13', name: 'Roof Cement', qty: qty.roofCement, price: prices.m13 || 8 });
   }
 
