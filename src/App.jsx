@@ -128,6 +128,8 @@ export default function App() {
     } else {
       handleAddEstimate(updatedEstimate);
     }
+    // Keep activeEstimate in sync so the wizard always has fresh data
+    setActiveEstimate(updatedEstimate);
   };
 
   const handleDuplicateEstimate = (duplicated) => {

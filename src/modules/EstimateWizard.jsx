@@ -472,9 +472,20 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         jobTaxPercent,
         updatedAt: new Date().toISOString(),
       };
+      // Add audit trail entry directly to the updated object (don't call addAuditEntry
+      // which would overwrite with stale estimate prop)
+      const auditEntry = {
+        id: generateId(),
+        action: 'estimate_saved',
+        detail: `Estimate saved with total cost ${totalCost}`,
+        userName: currentUser?.name || 'Unknown',
+        userRole: currentUser?.role || 'staff_estimator',
+        timestamp: new Date().toISOString(),
+      };
+      updated.auditTrail = [...(updated.auditTrail || estimate?.auditTrail || []), auditEntry];
+
       onSave(updated);
       setHasUnsavedChanges(false);
-      addAuditEntry('estimate_saved', `Estimate saved with total cost ${totalCost}`);
 
       // Show save confirmation
       const now = new Date();
