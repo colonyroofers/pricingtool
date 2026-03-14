@@ -12,12 +12,17 @@ const inputStyle = {
   boxSizing: 'border-box',
 };
 
-export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate, team = [], currentUser = {} }) {
+export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate, team = [], currentUser = {}, onDuplicate }) {
   const ESTIMATORS = (team || []).filter(t => t.role === 'estimator' && t.active).map(t => ({ name: t.name, value: t.name }));
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingEstimate, setEditingEstimate] = useState(null);
   const [viewMode, setViewMode] = useState('kanban'); // 'kanban' or 'list'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterState, setFilterState] = useState('all');
+  const [filterType, setFilterType] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
   const [formData, setFormData] = useState({
     propertyName: '',
     address: '',
@@ -91,6 +96,193 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
       onDeleteEstimate(estimateId);
     }
   };
+
+  const handleDuplicate = (estimate) => {
+    const duplicated = {
+      id: generateId(),
+      propertyName: estimate.propertyName + ' (Copy)',
+      address: estimate.address,
+      city: estimate.city,
+      state: estimate.state,
+      zip: estimate.zip,
+      contact: estimate.contact,
+      phone: estimate.phone,
+      type: estimate.type,
+      estimator: '',
+      notes: estimate.notes,
+      bidDueDate: estimate.bidDueDate,
+      status: 'unassigned',
+      buildings: estimate.buildings ? [...estimate.buildings] : [],
+      createdAt: new Date().toISOString(),
+    };
+    if (onDuplicate) {
+      onDuplicate(duplicated);
+    } else {
+      onAddEstimate(duplicated);
+    }
+  };
+
+  // Computed filteredEstimates with search, filters, and sort
+  const filteredEstimates = (() => {
+    let result = [...estimates];
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(e => e.propertyName.toLowerCase().includes(q));
+    }
+
+    // Apply state filter
+    if (filterState !== 'all') {
+      result = result.filter(e => e.state === filterState);
+    }
+
+    // Apply type filter
+    if (filterType !== 'all') {
+      result = result.filter(e => e.type === filterType);
+    }
+
+    // Apply status filter
+    if (filterStatus !== 'all') {
+      result = result.filter(e => e.status === filterStatus);
+    }
+
+    // Apply sort
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          return (b.createdAt || '').localeCompare(a.createdAt || '');
+        case 'oldest':
+          return (a.createdAt || '').localeCompare(b.createdAt || '');
+        case 'name-asc':
+          return a.propertyName.localeCompare(b.propertyName);
+        case 'name-desc':
+          return b.propertyName.localeCompare(a.propertyName);
+        case 'duedate':
+          {
+            const aDate = a.bidDueDate ? new Date(a.bidDueDate) : new Date('9999-12-31');
+            const bDate = b.bidDueDate ? new Date(b.bidDueDate) : new Date('9999-12-31');
+            return aDate - bDate;
+          }
+        case 'cost-high-low':
+          return (b.totalCost || 0) - (a.totalCost || 0);
+        default:
+          return 0;
+      }
+    });
+
+    return result;
+  })();
+
+  // ==================== FILTER BAR ====================
+  const renderFilterBar = () => (
+    <div style={{
+      backgroundColor: C.white,
+      borderBottom: `1px solid ${C.gray200}`,
+      padding: '12px 20px',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+    }}>
+      <input
+        type="text"
+        placeholder="Search estimates..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        style={{
+          padding: '8px 10px',
+          border: `1px solid ${C.gray200}`,
+          borderRadius: 6,
+          fontSize: 12,
+          height: 34,
+          width: 180,
+          boxSizing: 'border-box',
+        }}
+      />
+      <select
+        value={filterState}
+        onChange={(e) => setFilterState(e.target.value)}
+        style={{
+          padding: '8px 10px',
+          border: `1px solid ${C.gray200}`,
+          borderRadius: 6,
+          fontSize: 12,
+          height: 34,
+          boxSizing: 'border-box',
+          backgroundColor: C.white,
+          cursor: 'pointer',
+        }}
+      >
+        <option value="all">All States</option>
+        <option value="FL">Florida</option>
+        <option value="GA">Georgia</option>
+        <option value="TX">Texas</option>
+        <option value="TN">Tennessee</option>
+      </select>
+      <select
+        value={filterType}
+        onChange={(e) => setFilterType(e.target.value)}
+        style={{
+          padding: '8px 10px',
+          border: `1px solid ${C.gray200}`,
+          borderRadius: 6,
+          fontSize: 12,
+          height: 34,
+          boxSizing: 'border-box',
+          backgroundColor: C.white,
+          cursor: 'pointer',
+        }}
+      >
+        <option value="all">All Types</option>
+        <option value="shingle">Shingle</option>
+        <option value="tile">Tile</option>
+        <option value="tpo">TPO</option>
+      </select>
+      <select
+        value={filterStatus}
+        onChange={(e) => setFilterStatus(e.target.value)}
+        style={{
+          padding: '8px 10px',
+          border: `1px solid ${C.gray200}`,
+          borderRadius: 6,
+          fontSize: 12,
+          height: 34,
+          boxSizing: 'border-box',
+          backgroundColor: C.white,
+          cursor: 'pointer',
+        }}
+      >
+        <option value="all">All Statuses</option>
+        <option value="unassigned">Unassigned</option>
+        <option value="assigned">Assigned</option>
+        <option value="in_progress">In Progress</option>
+        <option value="submitted">Submitted</option>
+        <option value="approved">Approved</option>
+      </select>
+      <select
+        value={sortBy}
+        onChange={(e) => setSortBy(e.target.value)}
+        style={{
+          padding: '8px 10px',
+          border: `1px solid ${C.gray200}`,
+          borderRadius: 6,
+          fontSize: 12,
+          height: 34,
+          boxSizing: 'border-box',
+          backgroundColor: C.white,
+          cursor: 'pointer',
+        }}
+      >
+        <option value="newest">Newest</option>
+        <option value="oldest">Oldest</option>
+        <option value="name-asc">Name A-Z</option>
+        <option value="name-desc">Name Z-A</option>
+        <option value="duedate">Due Date</option>
+        <option value="cost-high-low">Cost High-Low</option>
+      </select>
+    </div>
+  );
 
   // ==================== BID DUE DATE TRACKER ====================
   const getDueDateItems = () => {
@@ -175,13 +367,6 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
 
   // ==================== LIST VIEW ====================
   const renderListView = () => {
-    const sorted = [...estimates].sort((a, b) => {
-      if (a.bidDueDate && b.bidDueDate) return a.bidDueDate.localeCompare(b.bidDueDate);
-      if (a.bidDueDate) return -1;
-      if (b.bidDueDate) return 1;
-      return (b.createdAt || '').localeCompare(a.createdAt || '');
-    });
-
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
@@ -203,7 +388,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
               </tr>
             </thead>
             <tbody>
-              {sorted.map((est, i) => {
+              {filteredEstimates.map((est, i) => {
                 const typeInfo = ESTIMATE_TYPES.find(t => t.key === est.type) || {};
                 const statusInfo = ESTIMATE_STATUSES.find(s => s.key === est.status) || {};
                 let dueBadge = null;
@@ -227,12 +412,12 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                     onClick={() => onOpenEstimate(est)}
                     style={{
                       borderBottom: `1px solid ${C.gray200}`,
-                      backgroundColor: i % 2 === 0 ? C.white : C.gray50,
+                      backgroundColor: C.white,
                       cursor: 'pointer',
                       transition: 'background-color 0.1s',
                     }}
                     onMouseOver={(e) => e.currentTarget.style.backgroundColor = C.blueBg}
-                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = i % 2 === 0 ? C.white : C.gray50}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = C.white}
                   >
                     <td style={tdStyle}>
                       <div style={{ fontWeight: 600, color: C.navy, fontSize: 13 }}>{est.propertyName}</div>
@@ -274,6 +459,8 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                        <button onClick={(e) => { e.stopPropagation(); handleDuplicate(est); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Duplicate">📋</button>
                         <button onClick={(e) => { e.stopPropagation(); handleEdit(est); }}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: C.gray400, padding: '2px 4px' }} title="Edit">✏️</button>
                         <button onClick={(e) => { e.stopPropagation(); handleDelete(est.id); }}
@@ -283,8 +470,10 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
                   </tr>
                 );
               })}
-              {sorted.length === 0 && (
-                <tr><td colSpan={8} style={{ ...tdStyle, textAlign: 'center', color: C.gray400, padding: 40 }}>No estimates yet. Click "+ New Estimate" to get started.</td></tr>
+              {filteredEstimates.length === 0 && (
+                <tr><td colSpan={9} style={{ ...tdStyle, textAlign: 'center', color: C.gray400, padding: 40 }}>
+                  {estimates.length === 0 ? 'No estimates yet. Click "+ New Estimate" to get started.' : 'No estimates match your filters.'}
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -406,6 +595,7 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
         </div>
       </div>
 
+      {renderFilterBar()}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {viewMode === 'kanban' ? (
           <div>
@@ -413,11 +603,12 @@ export default function DashboardModule({ estimates, onAddEstimate, onStatusChan
               {renderBidTracker()}
             </div>
             <KanbanBoard
-              estimates={estimates}
+              estimates={filteredEstimates}
               onStatusChange={onStatusChange}
               onCardClick={onOpenEstimate}
               onEditClick={handleEdit}
               onDeleteClick={handleDelete}
+              onDuplicate={handleDuplicate}
               onUpdateEstimate={onUpdateEstimate}
               team={team}
             />

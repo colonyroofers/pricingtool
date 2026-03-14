@@ -66,11 +66,14 @@ export const calculateShingleMaterials = (building, materials, state) => {
   // m15: NP1 — pipe count
   const np1 = pipes;
 
+  // m16: OSB Decking — 5% replacement estimate, 32 SF per sheet
+  const osbSheets = Math.ceil(totalArea * 0.05 / 32);
+
   return {
     shingleBundles, hipRidgeBundles, starterBundles, syntheticRolls,
     iceWaterRolls, ridgeVentCount, offRidgeVents, stepFlashingBoxes,
     dripEdgeCount, coilNailBoxes, capNailBoxes, pipeBoots,
-    roofCement, touchPaint, np1,
+    roofCement, touchPaint, np1, osbSheets,
     adjustedArea, squares,
   };
 };
@@ -122,6 +125,7 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
   lineItems.push(
     { id: 'm14', name: 'Touch Paint', qty: qty.touchPaint, price: prices.m14 || 7.25 },
     { id: 'm15', name: 'NP1', qty: qty.np1, price: prices.m15 || 8 },
+    { id: 'osb', name: 'OSB Decking (5% est.)', qty: qty.osbSheets, price: stLabor.osbPerSheet },
   );
 
   const materialCost = lineItems.reduce((sum, li) => sum + (li.qty * li.price), 0);
@@ -140,19 +144,21 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
     laborSquares = Math.ceil(pitchedWithWaste / 100);
   }
   const laborCost = laborSquares * stLabor.laborPerSquare;
+  const tearOffCost = laborSquares * stLabor.tearOffPerSquare;
+  const warrantyCost = laborSquares * stLabor.warrantyPerSq;
 
   // Tax on materials only
   const taxAmount = materialCost * stFin.taxRate;
 
   // Subtotal (equipment split at estimate level, not per-building)
-  const subtotal = materialCost + laborCost + taxAmount;
+  const subtotal = materialCost + laborCost + tearOffCost + warrantyCost + taxAmount;
 
   // Margin: total = subtotal / (1 - margin%)
   const margin = subtotal / (1 - stFin.margin) - subtotal;
   const total = subtotal + margin;
 
   return {
-    materialCost, laborCost, taxAmount, margin, total,
+    materialCost, laborCost, tearOffCost, warrantyCost, taxAmount, margin, total,
     quantities: qty, lineItems, laborSquares,
   };
 };
@@ -172,17 +178,21 @@ export const calculateEstimateCost = (buildings, materials, state) => {
 
   let grandMaterialCost = 0;
   let grandLaborCost = 0;
+  let grandTearOffCost = 0;
+  let grandWarrantyCost = 0;
   let grandTaxAmount = 0;
 
   const buildingResults = buildings.map(bldg => {
     const result = calculateBuildingCost(bldg, materials, stLabor, stFin, state);
     grandMaterialCost += result.materialCost;
     grandLaborCost += result.laborCost;
+    grandTearOffCost += result.tearOffCost;
+    grandWarrantyCost += result.warrantyCost;
     grandTaxAmount += result.taxAmount;
     return { ...result, equipmentCost: equipmentPerBuilding };
   });
 
-  const grandSubtotal = grandMaterialCost + grandLaborCost + totalEquipment + grandTaxAmount;
+  const grandSubtotal = grandMaterialCost + grandLaborCost + grandTearOffCost + grandWarrantyCost + totalEquipment + grandTaxAmount;
   const grandMargin = grandSubtotal / (1 - stFin.margin) - grandSubtotal;
   const grandTotal = grandSubtotal + grandMargin;
 
@@ -190,6 +200,8 @@ export const calculateEstimateCost = (buildings, materials, state) => {
     buildings: buildingResults,
     totalMaterial: grandMaterialCost,
     totalLabor: grandLaborCost,
+    totalTearOff: grandTearOffCost,
+    totalWarranty: grandWarrantyCost,
     totalEquipment,
     totalTax: grandTaxAmount,
     totalMargin: grandMargin,
@@ -243,7 +255,8 @@ export const calculateTPOCost = (materials, labor, financials) => {
 // ==================== TILE CALCULATIONS ====================
 
 export const calculateTileCost = (building, labor, financials, state) => {
-  const { totalArea, wastePercent = 15, ridges = 0, hips = 0, eaves = 0, valleys = 0 } = building;
+  const stFin = STATE_FINANCIALS[state] || financials;
+  const { totalArea, wastePercent = 20, ridges = 0, hips = 0, eaves = 0, valleys = 0 } = building;
   const adjustedArea = totalArea * (1 + wastePercent / 100);
   const squares = adjustedArea / 100;
 
@@ -266,9 +279,9 @@ export const calculateTileCost = (building, labor, financials, state) => {
     squares * battensPerSq * battenCost;
 
   const laborCost = squares * 185;
-  const taxAmount = materialCost * financials.taxRate;
+  const taxAmount = materialCost * stFin.taxRate;
   const subtotal = materialCost + laborCost + taxAmount;
-  const margin = subtotal / (1 - financials.margin) - subtotal;
+  const margin = subtotal / (1 - stFin.margin) - subtotal;
   const total = subtotal + margin;
 
   return { materialCost, laborCost, taxAmount, margin, total, quantities: { totalTiles, ridgeTileCount, underlaymentRolls, adjustedArea, squares } };

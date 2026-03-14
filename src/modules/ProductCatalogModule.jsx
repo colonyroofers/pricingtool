@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { C, DEFAULT_SHINGLE_MATERIALS, generateId } from '../utils/constants';
+import { C, DEFAULT_SHINGLE_MATERIALS, STATE_LABOR, STATE_FINANCIALS, STATES, generateId, fmt } from '../utils/constants';
 import { downloadCSV } from '../utils/helpers';
 import { useFirestoreCollection } from '../hooks/index';
 import DataTable from '../components/DataTable';
@@ -112,8 +112,8 @@ export default function ProductCatalogModule() {
   };
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: C.white }}>
-      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.gray200}` }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: C.gray50, overflow: 'auto' }}>
+      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.gray200}`, backgroundColor: C.white }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>Product Catalog</h2>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -139,10 +139,82 @@ export default function ProductCatalogModule() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
-        <DataTable columns={columns} data={displayData} onDataChange={handleDataChange} searchable />
+        {/* Materials Section */}
+        <div style={{ backgroundColor: C.white, borderRadius: 8, marginBottom: 24, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy, marginTop: 0, marginBottom: 16 }}>Material Pricing</h3>
+          <DataTable columns={columns} data={displayData} onDataChange={handleDataChange} searchable />
+        </div>
+
+        {/* Labor Rates Section */}
+        <div style={{ backgroundColor: C.white, borderRadius: 8, marginBottom: 24, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy, marginTop: 0, marginBottom: 16 }}>State Labor Rates</h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${C.gray200}` }}>
+                  <th style={{ textAlign: 'left', padding: '12px 8px', fontWeight: 600, color: C.navy }}>State</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Labor/Sq</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Forklift</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Dumpster</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Permit</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>OSB/Sheet</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Warranty/Sq</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Tear-off/Sq</th>
+                  <th style={{ textAlign: 'left', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Basis</th>
+                </tr>
+              </thead>
+              <tbody>
+                {STATES.map(state => {
+                  const labor = STATE_LABOR[state.code];
+                  return (
+                    <tr key={state.code} style={{ borderBottom: `1px solid ${C.gray200}` }}>
+                      <td style={{ padding: '12px 8px', fontWeight: 500, color: C.navy }}>{state.name}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.laborPerSquare)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.forkliftCost)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.dumpsterCost)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.permitCost)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.osbPerSheet)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.warrantyPerSq)}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{fmt(labor.tearOffPerSquare)}</td>
+                      <td style={{ padding: '12px 8px', color: C.gray700 }}>{labor.laborBasis}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Financial Rates Section */}
+        <div style={{ backgroundColor: C.white, borderRadius: 8, marginBottom: 24, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy, marginTop: 0, marginBottom: 16 }}>State Financial Rates</h3>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${C.gray200}` }}>
+                  <th style={{ textAlign: 'left', padding: '12px 8px', fontWeight: 600, color: C.navy }}>State</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Margin</th>
+                  <th style={{ textAlign: 'right', padding: '12px 8px', fontWeight: 600, color: C.navy }}>Tax Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {STATES.map(state => {
+                  const fin = STATE_FINANCIALS[state.code];
+                  return (
+                    <tr key={state.code} style={{ borderBottom: `1px solid ${C.gray200}` }}>
+                      <td style={{ padding: '12px 8px', fontWeight: 500, color: C.navy }}>{state.name}</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{(fin.margin * 100).toFixed(1)}%</td>
+                      <td style={{ textAlign: 'right', padding: '12px 8px', color: C.gray700 }}>{(fin.taxRate * 100).toFixed(2)}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
-      <div style={{ padding: '12px 24px', borderTop: `1px solid ${C.gray200}`, backgroundColor: C.gray50, display: 'flex', gap: 10 }}>
+      <div style={{ padding: '12px 24px', borderTop: `1px solid ${C.gray200}`, backgroundColor: C.white, display: 'flex', gap: 10 }}>
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleImportCSV} style={{ display: 'none' }} />
         <button onClick={() => fileInputRef.current?.click()}
           style={{ padding: '8px 16px', backgroundColor: C.white, color: C.navy, border: `1px solid ${C.gray300}`, borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>

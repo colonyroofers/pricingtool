@@ -13,9 +13,17 @@ export default function DataTable({ columns, data, onDataChange, searchable = tr
       )
     : data;
 
-  const handleCellChange = (rowIndex, colKey, newValue) => {
+  const handleCellChange = (rowIndex, colKey, newValue, colType) => {
+    let finalValue = newValue;
+    // Clamp negative values to 0 for number cells
+    if (colType === 'number' && newValue !== '') {
+      const numValue = parseFloat(newValue);
+      if (!isNaN(numValue) && numValue < 0) {
+        finalValue = '0';
+      }
+    }
     const newData = [...data];
-    newData[rowIndex] = { ...newData[rowIndex], [colKey]: newValue };
+    newData[rowIndex] = { ...newData[rowIndex], [colKey]: finalValue };
     onDataChange(newData);
     setEditingCell(null);
   };
@@ -111,7 +119,7 @@ export default function DataTable({ columns, data, onDataChange, searchable = tr
                         type={col.type || 'text'}
                         value={row[col.key]}
                         onChange={(e) =>
-                          handleCellChange(rowIndex, col.key, e.target.value)
+                          handleCellChange(rowIndex, col.key, e.target.value, col.type)
                         }
                         autoFocus
                         onBlur={() => setEditingCell(null)}

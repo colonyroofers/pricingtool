@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { C, EMPTY_BUILDING, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FINANCIALS,
   STATE_LABOR, STATE_FINANCIALS,
-  BUILDING_CODE_WARNINGS, SCOPE_ITEMS, UNIT_COSTS_TEXT, EXCLUSIONS, TPO_DEFAULT_LABOR,
+  BUILDING_CODE_WARNINGS, SCOPE_ITEMS, SCOPE_ITEMS_SHINGLE, SCOPE_ITEMS_TILE, SCOPE_ITEMS_TPO, UNIT_COSTS_TEXT, EXCLUSIONS, TPO_DEFAULT_LABOR,
+  COMPANY_INFO, CONTRACT_TERMS,
   fmt, fmtInt, generateId } from '../utils/constants';
 import { calculateShingleMaterials, calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
   calculateWastePercent, parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
@@ -27,7 +28,10 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   const [parsing, setParsing] = useState(false);
   const [proposalMode, setProposalMode] = useState('total'); // 'total' or 'itemized'
   const [uploadedFiles, setUploadedFiles] = useState(estimate?.uploadedFiles || []);
+  const [dragging, setDragging] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const fileInputRef = useRef(null);
+  const isInitialRender = useRef(true);
 
   useEffect(() => {
     if (estimate) {
@@ -46,8 +50,8 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   // Get or create estimate ID for file storage path
   const estimateId = estimate?.id || useRef(generateId()).current;
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+  // Helper to process a File object and handle merge/append logic
+  const processFile = async (file) => {
     if (!file) return;
 
     setParsing(true);
@@ -81,8 +85,25 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       if (ext === 'pdf') {
         const result = await parseRoofRPDF(file);
         if (result.buildings.length > 0) {
-          setBuildings(result.buildings);
-          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
+          if (buildings.length > 0) {
+            // Ask user whether to replace or append
+            if (window.confirm('Buildings already loaded. Click OK to replace all, or Cancel to add new buildings to existing ones.')) {
+              setBuildings(result.buildings);
+              setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
+            } else {
+              // Append and renumber
+              const newBuildings = result.buildings.map((b, idx) => ({
+                ...b,
+                siteplanNum: String(buildings.length + idx + 1),
+                roofrNum: String(buildings.length + idx + 1),
+              }));
+              setBuildings([...buildings, ...newBuildings]);
+              setUploadStatus(`Added ${result.buildings.length} buildings from ${result.pageCount} pages (renumbered). File uploaded. Review measurements below.`);
+            }
+          } else {
+            setBuildings(result.buildings);
+            setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
+          }
         } else {
           setUploadStatus(`PDF parsed (${result.pageCount} pages) — file uploaded. No building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
         }
@@ -94,10 +115,27 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
         } else {
           const result = await parseShingleExcel(file);
           if (result.buildings.length > 0) {
-            setBuildings(result.buildings);
+            if (buildings.length > 0) {
+              // Ask user whether to replace or append
+              if (window.confirm('Buildings already loaded. Click OK to replace all, or Cancel to add new buildings to existing ones.')) {
+                setBuildings(result.buildings);
+                setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
+              } else {
+                // Append and renumber
+                const newBuildings = result.buildings.map((b, idx) => ({
+                  ...b,
+                  siteplanNum: String(buildings.length + idx + 1),
+                  roofrNum: String(buildings.length + idx + 1),
+                }));
+                setBuildings([...buildings, ...newBuildings]);
+                setUploadStatus(`Added ${result.buildings.length} buildings from "${result.jobName || file.name}" (renumbered). File uploaded.`);
+              }
+            } else {
+              setBuildings(result.buildings);
+              setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
+            }
             if (result.jobName && !estimateName) setEstimateName(result.jobName);
             if (result.companyName && !estimateName) setEstimateName(result.companyName);
-            setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
           } else {
             const beamResult = await parseBeamAIExcel(file);
             if (beamResult.materials.length > 0) {
@@ -120,8 +158,12 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     setParsing(false);
 
     // Auto-save so file metadata persists to Firestore immediately
-    // (don't wait for the user to click Save — files should survive 500+ days)
     autoSaveRef.current = true;
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    await processFile(file);
   };
 
   // Auto-save effect: when autoSaveRef is flagged, save the estimate
@@ -166,7 +208,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     }]);
   };
 
+  const handleCopyPreviousBuilding = () => {
+    if (buildings.length === 0) return handleAddBuilding();
+    const last = buildings[buildings.length - 1];
+    setBuildings([...buildings, {
+      ...last,
+      siteplanNum: String(buildings.length + 1),
+      roofrNum: String(buildings.length + 1),
+      pipes: 0,
+      dryerVents: 0,
+    }]);
+  };
+
   const handleDeleteBuilding = (index) => {
+    if (!window.confirm('Delete Building ' + (buildings[index]?.siteplanNum || index + 1) + '? This cannot be undone.')) return;
     if (buildings.length <= 1) return;
     const updated = buildings.filter((_, i) => i !== index);
     setBuildings(updated);
@@ -194,7 +249,29 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       updatedAt: new Date().toISOString(),
     };
     onSave(updated);
+    setHasUnsavedChanges(false);
   };
+
+  // Track unsaved changes: watch for changes but skip the initial render
+  useEffect(() => {
+    if (isInitialRender.current) {
+      isInitialRender.current = false;
+      return;
+    }
+    setHasUnsavedChanges(true);
+  }, [buildings, tpoMaterials, estimateName, marketState, estimateType]);
+
+  // Warn before leaving if there are unsaved changes
+  useEffect(() => {
+    const handler = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   // ==================== COST CALCULATIONS ====================
 
@@ -233,6 +310,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   const shingleColumns = [
     { key: 'siteplanNum', label: 'Bldg #', editable: true },
     { key: 'totalArea', label: 'Area (SF)', editable: true, type: 'number' },
+    { key: 'pitchedArea', label: 'Pitched (SF)', editable: true, type: 'number' },
     { key: 'predominantPitch', label: 'Pitch', editable: true },
     { key: 'wastePercent', label: 'Waste %', editable: true, type: 'number' },
     { key: 'eaves', label: 'Eaves (LF)', editable: true, type: 'number' },
@@ -241,7 +319,9 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     { key: 'ridges', label: 'Ridges (LF)', editable: true, type: 'number' },
     { key: 'rakes', label: 'Rakes (LF)', editable: true, type: 'number' },
     { key: 'stepFlashing', label: 'Step Flash (LF)', editable: true, type: 'number' },
+    { key: 'wallFlashing', label: 'Wall Flash (LF)', editable: true, type: 'number' },
     { key: 'pipes', label: 'Pipes', editable: true, type: 'number' },
+    { key: 'dryerVents', label: 'Dryer Vents', editable: true, type: 'number' },
   ];
 
   const tpoColumns = [
@@ -296,6 +376,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       rows.push(
         { name: 'Touch Paint', qty: qty.touchPaint, unit: 'EA', price: prices.m14 },
         { name: 'NP1', qty: qty.np1, unit: 'EA', price: prices.m15 },
+        { name: 'OSB Decking (5% est.)', qty: qty.osbSheets, unit: 'SHT', price: stLabor.osbPerSheet },
       );
       return rows;
     };
@@ -383,29 +464,54 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(r.qty * r.price)}</td>
                     </tr>
                   ))}
-                  {/* Labor row */}
+                  {/* Labor rows */}
                   <tr style={{ backgroundColor: C.blueBg, borderTop: `2px solid ${C.gray300}` }}>
-                    <td style={tdStyle}>Labor ({laborSquares} SQ × {fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}/SQ)</td>
+                    <td style={tdStyle}>Install Labor ({laborSquares} SQ × {fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}/SQ)</td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
                     <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborCost)}</td>
                   </tr>
+                  {estimateType !== 'tile' && (
+                    <tr style={{ backgroundColor: C.blueBg }}>
+                      <td style={tdStyle}>Tearoff Labor ({laborSquares} SQ × {fmt(stLabor.tearOffPerSquare)}/SQ)</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(stLabor.tearOffPerSquare)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborSquares * stLabor.tearOffPerSquare)}</td>
+                    </tr>
+                  )}
+                  {estimateType !== 'tile' && (
+                    <tr style={{ backgroundColor: C.blueBg }}>
+                      <td style={tdStyle}>Warranty ({laborSquares} SQ × {fmt(stLabor.warrantyPerSq)}/SQ)</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(stLabor.warrantyPerSq)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborSquares * stLabor.warrantyPerSq)}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
 
               {/* Building subtotal */}
-              <div style={{
-                backgroundColor: C.gray100, padding: '8px 16px',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              }}>
-                <span style={{ fontSize: 12, color: C.gray600 }}>
-                  Material: {fmt(matTotal)} · Labor: {fmt(laborCost)} · Tax ({(stFin.taxRate * 100).toFixed(1)}%): {fmt(matTotal * stFin.taxRate)}
-                </span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
-                  Subtotal: {fmt(matTotal + laborCost + matTotal * stFin.taxRate)}
-                </span>
-              </div>
+              {(() => {
+                const tearOff = estimateType !== 'tile' ? laborSquares * stLabor.tearOffPerSquare : 0;
+                const warranty = estimateType !== 'tile' ? laborSquares * stLabor.warrantyPerSq : 0;
+                const bldgSubtotal = matTotal + laborCost + tearOff + warranty + matTotal * stFin.taxRate;
+                return (
+                  <div style={{
+                    backgroundColor: C.gray100, padding: '8px 16px',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span style={{ fontSize: 12, color: C.gray600 }}>
+                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost + tearOff)} · Warranty: {fmt(warranty)} · Tax ({(stFin.taxRate * 100).toFixed(1)}%): {fmt(matTotal * stFin.taxRate)}
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
+                      Subtotal: {fmt(bldgSubtotal)}
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -452,17 +558,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       {/* File Upload Zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); const file = e.dataTransfer.files[0]; if (file) { processFile(file); } }}
         style={{
-          border: `2px dashed ${C.gray300}`,
+          border: `2px dashed ${dragging ? C.blue : C.gray300}`,
           borderRadius: 8,
           padding: 32,
           textAlign: 'center',
-          backgroundColor: C.gray50,
+          backgroundColor: dragging ? '#E3F2FD' : C.gray50,
           cursor: 'pointer',
-          transition: 'border-color 0.2s',
+          transition: 'border-color 0.2s, background-color 0.2s',
         }}
-        onMouseOver={(e) => e.currentTarget.style.borderColor = C.blue}
-        onMouseOut={(e) => e.currentTarget.style.borderColor = C.gray300}
+        onMouseOver={(e) => !dragging && (e.currentTarget.style.borderColor = C.blue)}
+        onMouseOut={(e) => !dragging && (e.currentTarget.style.borderColor = C.gray300)}
       >
         <input
           ref={fileInputRef}
@@ -606,10 +715,16 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>Buildings ({buildings.length})</h3>
-          <button onClick={handleAddBuilding}
-            style={{ padding: '6px 12px', backgroundColor: C.blue, color: C.white, border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-            + Add Building
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleCopyPreviousBuilding}
+              style={{ padding: '6px 12px', backgroundColor: C.blue, color: C.white, border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              📋 Copy Previous
+            </button>
+            <button onClick={handleAddBuilding}
+              style={{ padding: '6px 12px', backgroundColor: C.blue, color: C.white, border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+              + Add Building
+            </button>
+          </div>
         </div>
         <DataTable columns={shingleColumns} data={buildings} onDataChange={setBuildings} searchable={false}
           onDeleteRow={handleDeleteBuilding} roundDecimals={2} />
@@ -680,7 +795,9 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
             <tr style={{ backgroundColor: C.gray50 }}>
               <th style={thStyle}>Building</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>Material</th>
-              <th style={{ ...thStyle, textAlign: 'right' }}>Labor</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Install</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Tearoff</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Warranty</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
             </tr>
@@ -691,6 +808,8 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                 <td style={tdStyle}>Building {row.building}</td>
                 <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.materialCost)}</td>
                 <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.laborCost)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.tearOffCost || 0)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.warrantyCost || 0)}</td>
                 <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(row.equipmentCost || 0)}</td>
                 <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: C.navy }}>{fmt(row.total)}</td>
               </tr>
@@ -711,6 +830,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
   const renderStep4 = () => {
     const totalCost = getTotalCost();
+    const scopeItems = estimateType === 'tpo' ? SCOPE_ITEMS_TPO : estimateType === 'tile' ? SCOPE_ITEMS_TILE : SCOPE_ITEMS_SHINGLE;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -738,6 +858,8 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, paddingBottom: 16, borderBottom: `2px solid ${C.red}` }}>
             <div>
               <h2 style={{ fontSize: 20, fontWeight: 700, color: C.navy, margin: 0 }}>Colony Roofers</h2>
+              <p style={{ fontSize: 11, color: C.gray500, margin: '2px 0' }}>{COMPANY_INFO.phone} | {COMPANY_INFO.email}</p>
+              <p style={{ fontSize: 11, color: C.gray500, margin: '2px 0 0' }}>{COMPANY_INFO.website}</p>
               <p style={{ fontSize: 12, color: C.gray500, margin: '4px 0 0' }}>Commercial Roofing Proposal</p>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -756,7 +878,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
           {/* Scope of Work */}
           <h4 style={{ fontSize: 14, fontWeight: 600, color: C.navy, marginBottom: 8 }}>Scope of Work</h4>
           <ul style={{ marginLeft: 20, marginBottom: 20 }}>
-            {SCOPE_ITEMS.map((item, i) => (
+            {scopeItems.map((item, i) => (
               <li key={i} style={{ marginBottom: 6 }}>{item}</li>
             ))}
           </ul>
@@ -793,9 +915,27 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
           {/* Terms */}
           <h4 style={{ fontSize: 14, fontWeight: 600, color: C.navy, marginBottom: 8 }}>Terms & Conditions</h4>
-          <p style={{ marginBottom: 6 }}>50% deposit to schedule, remaining balance due upon completion.</p>
-          <p style={{ marginBottom: 6 }}>This estimate is valid for 30 days from the date above.</p>
-          <p>All work performed under this contract carries a manufacturer warranty and a two (2) year workmanship warranty.</p>
+          <ul style={{ marginLeft: 20, marginBottom: 20 }}>
+            {CONTRACT_TERMS.map((term, i) => (
+              <li key={i} style={{ marginBottom: 6 }}>{term}</li>
+            ))}
+          </ul>
+
+          {/* Acceptance */}
+          <div style={{ marginTop: 30, paddingTop: 20, borderTop: `2px solid ${C.gray200}` }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, color: C.navy, marginBottom: 8 }}>Acceptance</h4>
+            <p style={{ marginBottom: 16 }}>By signing below, the authorized representative agrees to the scope of work and terms described above.</p>
+            <div style={{ display: 'flex', gap: 40, marginTop: 20 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ borderBottom: '1px solid #000', height: 30, marginBottom: 4 }}></div>
+                <p style={{ fontSize: 10 }}>Authorized Signature</p>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ borderBottom: '1px solid #000', height: 30, marginBottom: 4 }}></div>
+                <p style={{ fontSize: 10 }}>Date</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Action Buttons */}
@@ -822,13 +962,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
       let page = pdfDoc.addPage([612, 792]);
       let y = 740;
+      let pageNum = 1;
       const lm = 50;
       const navy = rgb(0.106, 0.165, 0.290);
       const red = rgb(0.902, 0.224, 0.275);
       const gray = rgb(0.4, 0.4, 0.4);
+      const lightGray = rgb(0.6, 0.6, 0.6);
+
+      const scopeItems = estimateType === 'tpo' ? SCOPE_ITEMS_TPO : estimateType === 'tile' ? SCOPE_ITEMS_TILE : SCOPE_ITEMS_SHINGLE;
 
       const addText = (text, x, size, fontType, color) => {
-        if (y < 60) {
+        if (y < 80) {
+          // Add page number to current page
+          page.drawText(`Page ${pageNum}`, { x: 512, y: 20, size: 9, font, color: lightGray });
+          pageNum += 1;
           page = pdfDoc.addPage([612, 792]);
           y = 740;
         }
@@ -838,9 +985,15 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       // Header
       addText('Colony Roofers', lm, 22, boldFont, navy);
       y -= 20;
+      addText(COMPANY_INFO.phone + ' | ' + COMPANY_INFO.email, lm, 10, font, gray);
+      y -= 12;
+      addText(COMPANY_INFO.website, lm, 10, font, gray);
+      y -= 14;
       addText('Commercial Roofing Proposal', lm, 11, font, gray);
       y -= 14;
       addText(`Date: ${new Date().toLocaleDateString()}`, lm, 10, font, gray);
+      y -= 12;
+      addText(`Estimate #: ${estimate?.id?.slice(0, 6).toUpperCase() || 'DRAFT'}`, lm, 10, font, gray);
       y -= 30;
 
       // Red line
@@ -861,7 +1014,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       // Scope
       addText('Scope of Work:', lm, 12, boldFont, navy);
       y -= 16;
-      SCOPE_ITEMS.forEach(item => {
+      scopeItems.forEach(item => {
         const lines = wrapText(item, font, 10, 500);
         lines.forEach(line => {
           addText(`  •  ${line}`, lm, 10, font, gray);
@@ -871,20 +1024,58 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       });
       y -= 10;
 
+      // Pricing by Building (for itemized mode with shingle/tile)
+      if (proposalMode === 'itemized' && estimateType !== 'tpo') {
+        addText('Pricing by Building:', lm, 12, boldFont, navy);
+        y -= 16;
+        const costs = estimateType === 'tile' ? getTileCosts() : getShingleCosts();
+        costs.rows.forEach(row => {
+          addText(`Building ${row.building}: ${fmt(row.total)}`, lm, 10, font, gray);
+          y -= 14;
+        });
+        y -= 10;
+      }
+
       // Total
       addText('Project Total:', lm, 12, boldFont, navy);
       y -= 20;
       addText(fmtInt(getTotalCost()), lm, 18, boldFont, red);
       y -= 30;
 
+      // Unit Costs
+      addText('Additional Unit Costs:', lm, 12, boldFont, navy);
+      y -= 16;
+      UNIT_COSTS_TEXT.forEach(item => {
+        const lines = wrapText(item, font, 10, 500);
+        lines.forEach(line => {
+          addText(`  •  ${line}`, lm, 10, font, gray);
+          y -= 14;
+        });
+        y -= 2;
+      });
+      y -= 10;
+
+      // Exclusions
+      addText('Exclusions:', lm, 12, boldFont, navy);
+      y -= 16;
+      const exclusionLines = wrapText(EXCLUSIONS, font, 10, 500);
+      exclusionLines.forEach(line => {
+        addText(line, lm, 10, font, gray);
+        y -= 14;
+      });
+      y -= 10;
+
       // Terms
       addText('Terms & Conditions:', lm, 12, boldFont, navy);
       y -= 16;
-      addText('50% deposit to schedule, remaining balance due upon completion.', lm, 10, font, gray);
-      y -= 14;
-      addText('This estimate is valid for 30 days.', lm, 10, font, gray);
-      y -= 14;
-      addText('All work carries manufacturer warranty and 2-year workmanship warranty.', lm, 10, font, gray);
+      CONTRACT_TERMS.forEach(term => {
+        const lines = wrapText(term, font, 10, 500);
+        lines.forEach(line => {
+          addText(`  •  ${line}`, lm, 10, font, gray);
+          y -= 14;
+        });
+        y -= 2;
+      });
 
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -912,7 +1103,10 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
           <h2 style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>
             {estimateName || 'New Estimate'}
           </h2>
-          <button onClick={onClose}
+          <button onClick={() => {
+              if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Leave without saving?')) return;
+              onClose();
+            }}
             style={{ padding: '6px 12px', backgroundColor: C.gray200, color: C.gray600, border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
             Back to Dashboard
           </button>
@@ -951,7 +1145,14 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
         padding: '12px 24px', borderTop: `1px solid ${C.gray200}`,
         display: 'flex', justifyContent: 'space-between', backgroundColor: C.gray50,
       }}>
-        <button onClick={() => step === 1 ? onClose() : setStep(step - 1)}
+        <button onClick={() => {
+          if (step === 1) {
+            if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Leave without saving?')) return;
+            onClose();
+          } else {
+            setStep(step - 1);
+          }
+        }}
           style={{ padding: '10px 20px', backgroundColor: C.gray200, color: C.navy, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
           {step === 1 ? 'Cancel' : 'Back'}
         </button>

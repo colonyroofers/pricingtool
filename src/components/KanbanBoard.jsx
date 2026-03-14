@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { C, ESTIMATE_STATUSES, ESTIMATE_TYPES, fmt } from '../utils/constants';
 import Badge from './Badge';
 
-export default function KanbanBoard({ estimates, onStatusChange, onCardClick, onEditClick, onDeleteClick, onUpdateEstimate, team = [] }) {
+export default function KanbanBoard({ estimates, onStatusChange, onCardClick, onEditClick, onDeleteClick, onUpdateEstimate, onDuplicate, team = [] }) {
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
 
@@ -205,6 +205,16 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
                         <Badge label={typeInfo.label} color={C.blue} bg={C.blueBg} />
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDuplicate && onDuplicate(estimate); }}
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            fontSize: 14, color: C.gray400, padding: '2px 4px',
+                          }}
+                          title="Duplicate"
+                        >
+                          📋
+                        </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); onEditClick(estimate); }}
                           style={{

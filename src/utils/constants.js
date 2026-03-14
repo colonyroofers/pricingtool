@@ -79,10 +79,10 @@ export const DEFAULT_SHINGLE_MATERIALS = [
 // State-specific labor rates (from FL & GA spreadsheets)
 // TX defaults to FL, TN defaults to GA
 export const STATE_LABOR = {
-  FL: { laborPerSquare: 120, forkliftCost: 6564, dumpsterCost: 19840, permitCost: 3440, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'pitched' },
-  GA: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'total' },
-  TX: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'total' },
-  TN: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, laborBasis: 'total' },
+  FL: { laborPerSquare: 120, forkliftCost: 6564, dumpsterCost: 19840, permitCost: 3440, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 50, laborBasis: 'pitched' },
+  GA: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'total' },
+  TX: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'total' },
+  TN: { laborPerSquare: 75, forkliftCost: 7373, dumpsterCost: 23120, permitCost: 4825, osbPerSheet: 42.95, warrantyPerSq: 11, tearOffPerSquare: 45, laborBasis: 'total' },
 };
 
 // State-specific financials (from FL & GA spreadsheets)
@@ -130,8 +130,8 @@ export const BUILDING_CODE_WARNINGS = {
   ]
 };
 
-// Scope items
-export const SCOPE_ITEMS = [
+// Scope items - type-specific
+export const SCOPE_ITEMS_SHINGLE = [
   "Install temporary safety equipment to meet or exceed OSHA and company set safety guidelines.",
   "Remove existing shingles roofing system and all related accessories down to exposed roof deck.",
   "Inspect existing roof deck ensuring it is ready for proper installation of the new roof assembly.",
@@ -144,6 +144,35 @@ export const SCOPE_ITEMS = [
   "Furnish owner with two (2) year workmanship warranty.",
 ];
 
+export const SCOPE_ITEMS_TILE = [
+  "Install temporary safety equipment to meet or exceed OSHA and company set safety guidelines.",
+  "Remove existing tile roofing system and all related accessories down to exposed roof deck.",
+  "Inspect existing roof deck ensuring it is ready for proper installation of the new roof assembly.",
+  "Furnish and install ice and water barrier in a three-foot swath at all valleys and roof penetrations.",
+  "Furnish and install new synthetic underlayment.",
+  "Furnish and install new concrete roof tiles per manufacturer specifications. Color and profile to be determined.",
+  "Install new ridge and hip tiles with appropriate adhesive and fasteners.",
+  "All roofing details including but not limited to flashing, roof penetrations, hips and ridges shall meet manufacturer's specifications and installation requirements.",
+  "Dispose of all debris in an appropriate container and remove from jobsite.",
+  "Furnish owner with a Limited Lifetime Manufacturer Warranty.",
+  "Furnish owner with two (2) year workmanship warranty.",
+];
+
+export const SCOPE_ITEMS_TPO = [
+  "Install temporary safety equipment to meet or exceed OSHA and company set safety guidelines.",
+  "Remove existing roofing system and all related accessories down to structural deck.",
+  "Inspect existing roof deck ensuring it is ready for proper installation of the new roof assembly.",
+  "Furnish and install new ISO insulation board to achieve minimum R-value per code requirements.",
+  "Furnish and install new TPO single-ply membrane. Color and mil thickness to be determined.",
+  "All roofing details including but not limited to flashing, curbs, penetrations, drains, and terminations shall meet manufacturer's specifications.",
+  "Dispose of all debris in an appropriate container and remove from jobsite.",
+  "Furnish owner with a 20-year NDL Manufacturer Warranty.",
+  "Furnish owner with two (2) year workmanship warranty.",
+];
+
+// Backward compatibility alias
+export const SCOPE_ITEMS = SCOPE_ITEMS_SHINGLE;
+
 export const UNIT_COSTS_TEXT = [
   "At discovery if any fascia is determined to be deteriorated, removal and replacement will be billed at $15 per LF.",
   "At discovery if any soffit is determined to be deteriorated, removal and replacement will be billed at $15 per LF.",
@@ -151,6 +180,27 @@ export const UNIT_COSTS_TEXT = [
 ];
 
 export const EXCLUSIONS = "Carpentry, HVAC, Electrical, Plumbing, Asbestos Abatement, and Framing.";
+
+// Company info
+export const COMPANY_INFO = {
+  name: "Colony Roofers",
+  phone: "(404) 610-1178",
+  email: "info@colonyroofers.com",
+  website: "www.colonyroofers.com",
+  address: "",
+  licenseGA: "",
+  licenseFl: "",
+};
+
+// Contract terms
+export const CONTRACT_TERMS = [
+  "50% deposit required to schedule. Remaining balance due upon substantial completion.",
+  "This estimate is valid for 30 days from the date above.",
+  "All work carries a manufacturer warranty and a two (2) year workmanship warranty.",
+  "Any additional work discovered during tear-off (decking replacement, structural repair) will be documented and billed at the unit rates listed above.",
+  "Timeline is subject to weather conditions, material availability, and permitting schedules.",
+  "Upon final payment, Colony Roofers will provide lien waivers from all subcontractors and material suppliers.",
+];
 
 // TPO defaults
 export const TPO_UNIT_COSTS = {
