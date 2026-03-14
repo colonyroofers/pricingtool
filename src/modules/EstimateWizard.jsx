@@ -3,7 +3,7 @@ import { C, EMPTY_BUILDING, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FI
   STATE_LABOR, STATE_FINANCIALS,
   BUILDING_CODE_WARNINGS, SCOPE_ITEMS, UNIT_COSTS_TEXT, EXCLUSIONS, TPO_DEFAULT_LABOR,
   fmt, fmtInt, generateId } from '../utils/constants';
-import { calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
+import { calculateShingleMaterials, calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
   parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
 import { uploadFile, deleteFile } from '../utils/firebase';
 import DataTable from '../components/DataTable';
@@ -236,6 +236,198 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     { key: 'unit', label: 'Unit', editable: true },
     { key: 'unitCost', label: 'Unit Cost', editable: true, type: 'number' },
   ];
+
+  // ==================== CALCULATIONS RENDERER ====================
+
+  const renderCalculations = () => {
+    if (estimateType === 'tpo') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>Calculations</h3>
+          <p style={{ fontSize: 13, color: C.gray500 }}>TPO calculations are shown in the Pricing tab.</p>
+        </div>
+      );
+    }
+
+    const materials = DEFAULT_SHINGLE_MATERIALS;
+    const stLabor = STATE_LABOR[marketState] || STATE_LABOR.FL;
+    const stFin = STATE_FINANCIALS[marketState] || STATE_FINANCIALS.FL;
+
+    // Material row definitions matching spreadsheet "Total Cost Calc" tab
+    const getMaterialRows = (qty, state) => {
+      const prices = {};
+      materials.forEach(m => { prices[m.id] = m.prices[state] || 0; });
+
+      const rows = [
+        { name: 'Architectural Shingles', qty: qty.shingleBundles, unit: 'BNDL', price: prices.m1 },
+        { name: 'Hip and Ridge', qty: qty.hipRidgeBundles, unit: 'BNDL', price: prices.m2 },
+        { name: 'Starter Strip', qty: qty.starterBundles, unit: 'BNDL', price: prices.m3 },
+        { name: 'Synthetic Underlayment', qty: qty.syntheticRolls, unit: 'ROLL', price: prices.m4 },
+        { name: 'Ice and Water Shield', qty: qty.iceWaterRolls, unit: 'ROLL', price: prices.m5 },
+        { name: 'Ridge Vent', qty: qty.ridgeVentCount, unit: 'EA', price: prices.m6 },
+      ];
+      if (state === 'FL') {
+        rows.push({ name: 'Off-Ridge Vents', qty: qty.offRidgeVents, unit: 'EA', price: prices.m7 });
+      }
+      rows.push(
+        { name: 'Step Flashing', qty: qty.stepFlashingBoxes, unit: 'BOX', price: prices.m8 },
+        { name: 'Drip Edge', qty: qty.dripEdgeCount, unit: 'EA', price: prices.m9 },
+        { name: 'Coil Nails', qty: qty.coilNailBoxes, unit: 'BOX', price: prices.m10 },
+        { name: 'Cap Nails', qty: qty.capNailBoxes, unit: 'BOX', price: prices.m11 },
+        { name: 'Pipe Boots', qty: qty.pipeBoots, unit: 'EA', price: prices.m12 },
+      );
+      if (state === 'FL') {
+        rows.push({ name: 'Roof Cement', qty: qty.roofCement, unit: 'BCKT', price: prices.m13 });
+      }
+      rows.push(
+        { name: 'Touch Paint', qty: qty.touchPaint, unit: 'EA', price: prices.m14 },
+        { name: 'NP1', qty: qty.np1, unit: 'EA', price: prices.m15 },
+      );
+      return rows;
+    };
+
+    // For tile estimates
+    const getTileCalcRows = (building) => {
+      const { totalArea, wastePercent = 15, ridges = 0, hips = 0 } = building;
+      const adjustedArea = totalArea * (1 + wastePercent / 100);
+      const squares = adjustedArea / 100;
+      const tilePerSq = 90;
+      return [
+        { name: 'Roof Tiles', qty: Math.ceil(squares * tilePerSq), unit: 'EA', price: 2.85 },
+        { name: 'Ridge/Hip Tiles', qty: Math.ceil(ridges + hips), unit: 'LF', price: 4.50 },
+        { name: 'Underlayment', qty: Math.ceil(adjustedArea / 1000), unit: 'ROLL', price: 60 },
+        { name: 'Battens', qty: Math.round(squares * 18), unit: 'EA', price: 1.25 },
+      ];
+    };
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, color: C.navy }}>
+            {estimateType === 'tile' ? 'Tile' : 'Shingle'} Calculations — Building by Building
+          </h3>
+          <span style={{ fontSize: 12, color: C.gray500 }}>Market: {marketState}</span>
+        </div>
+
+        {buildings.map((bldg, bIdx) => {
+          const matRows = estimateType === 'tile'
+            ? getTileCalcRows(bldg)
+            : getMaterialRows(calculateShingleMaterials(bldg, materials, marketState), marketState);
+          const matTotal = matRows.reduce((s, r) => s + r.qty * r.price, 0);
+
+          // Labor calc
+          let laborSquares, laborCost;
+          if (estimateType === 'tile') {
+            const sq = (bldg.totalArea * (1 + (bldg.wastePercent || 15) / 100)) / 100;
+            laborSquares = Math.ceil(sq);
+            laborCost = sq * 185;
+          } else {
+            const waste = (bldg.wastePercent || 12) / 100;
+            if (stLabor.laborBasis === 'total') {
+              laborSquares = Math.ceil(bldg.totalArea / 100);
+            } else {
+              laborSquares = Math.ceil((bldg.pitchedArea || bldg.totalArea) * (1 + waste) / 100);
+            }
+            laborCost = laborSquares * stLabor.laborPerSquare;
+          }
+
+          return (
+            <div key={bIdx} style={{
+              border: `1px solid ${C.gray200}`, borderRadius: 8, overflow: 'hidden',
+            }}>
+              {/* Building header */}
+              <div style={{
+                backgroundColor: C.navy, padding: '10px 16px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.white }}>
+                  Building {bldg.siteplanNum || bIdx + 1}
+                </span>
+                <span style={{ fontSize: 11, color: C.gray300 }}>
+                  {fmtInt(bldg.totalArea)} SF · Pitch {bldg.predominantPitch || 'N/A'} · {bldg.wastePercent || 12}% waste
+                </span>
+              </div>
+
+              {/* Material rows */}
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ backgroundColor: C.gray50 }}>
+                    <th style={thStyle}>Material</th>
+                    <th style={{ ...thStyle, textAlign: 'center', width: 70 }}>Qty</th>
+                    <th style={{ ...thStyle, textAlign: 'center', width: 60 }}>Unit</th>
+                    <th style={{ ...thStyle, textAlign: 'right', width: 90 }}>Unit Price</th>
+                    <th style={{ ...thStyle, textAlign: 'right', width: 100 }}>Line Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matRows.map((r, i) => (
+                    <tr key={i} style={{ backgroundColor: i % 2 === 0 ? C.white : C.gray50, borderBottom: `1px solid ${C.gray200}` }}>
+                      <td style={tdStyle}>{r.name}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{r.qty}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>{r.unit}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(r.price)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(r.qty * r.price)}</td>
+                    </tr>
+                  ))}
+                  {/* Labor row */}
+                  <tr style={{ backgroundColor: C.blueBg, borderTop: `2px solid ${C.gray300}` }}>
+                    <td style={tdStyle}>Labor ({laborSquares} SQ × {fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}/SQ)</td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
+                    <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11, color: C.gray400 }}>SQ</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(estimateType === 'tile' ? 185 : stLabor.laborPerSquare)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborCost)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Building subtotal */}
+              <div style={{
+                backgroundColor: C.gray100, padding: '8px 16px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <span style={{ fontSize: 12, color: C.gray600 }}>
+                  Material: {fmt(matTotal)} · Labor: {fmt(laborCost)} · Tax ({(stFin.taxRate * 100).toFixed(1)}%): {fmt(matTotal * stFin.taxRate)}
+                </span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
+                  Subtotal: {fmt(matTotal + laborCost + matTotal * stFin.taxRate)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Equipment & Grand total summary */}
+        {estimateType !== 'tile' && (
+          <div style={{
+            backgroundColor: C.gray100, padding: 16, borderRadius: 8,
+            border: `1px solid ${C.gray200}`,
+          }}>
+            <p style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 8 }}>
+              Equipment Costs (split across {buildings.length} building{buildings.length !== 1 ? 's' : ''})
+            </p>
+            <div style={{ display: 'flex', gap: 20, fontSize: 12, color: C.gray600 }}>
+              <span>Forklift: {fmt(stLabor.forkliftCost)}</span>
+              <span>Dumpster: {fmt(stLabor.dumpsterCost)}</span>
+              <span>Permit: {fmt(stLabor.permitCost)}</span>
+              <span style={{ fontWeight: 600 }}>Total: {fmt(stLabor.forkliftCost + stLabor.dumpsterCost + stLabor.permitCost)}</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{
+          backgroundColor: C.gray100, padding: 16, borderRadius: 8,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 12, color: C.gray500 }}>
+            Margin: {(stFin.margin * 100).toFixed(0)}% · Tax: {(stFin.taxRate * 100).toFixed(1)}%
+          </span>
+          <span style={{ fontSize: 11, color: C.gray400 }}>
+            Final pricing with margin shown in Pricing tab →
+          </span>
+        </div>
+      </div>
+    );
+  };
 
   // ==================== STEP RENDERERS ====================
 
@@ -696,7 +888,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
   // ==================== RENDER ====================
 
-  const steps = ['Upload', 'Measurements', 'Pricing', 'Proposal'];
+  const steps = ['Upload', 'Measurements', 'Calculations', 'Pricing', 'Proposal'];
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: C.white }}>
@@ -735,8 +927,9 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-        {step === 4 && renderStep4()}
+        {step === 3 && renderCalculations()}
+        {step === 4 && renderStep3()}
+        {step === 5 && renderStep4()}
       </div>
 
       {/* Footer Nav */}
@@ -753,7 +946,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
             style={{ padding: '10px 20px', backgroundColor: C.navy, color: C.white, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             Save
           </button>
-          {step < 4 && (
+          {step < 5 && (
             <button onClick={() => setStep(step + 1)}
               style={{ padding: '10px 20px', backgroundColor: C.red, color: C.white, border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
               Next
