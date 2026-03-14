@@ -701,7 +701,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                   Building {bldg.siteplanNum || bIdx + 1}
                 </span>
                 <span style={{ fontSize: 11, color: C.gray300 }}>
-                  {fmtInt(bldg.totalArea)} SF · Pitch {bldg.predominantPitch || 'N/A'} · {bldg.wastePercent || 12}% waste
+                  {Number(bldg.totalArea || 0).toLocaleString('en-US')} SF · Pitch {bldg.predominantPitch || 'N/A'} · {bldg.wastePercent || 12}% waste
                 </span>
               </div>
 
