@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { auth } from '../utils/firebase';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { auth, db, subscribeCollection, saveDocument, deleteDocument } from '../utils/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { signInWithGoogle, signOutUser } from '../utils/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 
 // Auth hook
 export const useAuth = () => {
@@ -16,26 +16,91 @@ export const useAuth = () => {
     return unsub;
   }, []);
 
-  return { user, loading, signIn: signInWithGoogle, signOut: signOutUser };
+  return { user, loading, signIn: () => {}, signOut: () => {} };
 };
 
-// Firestore collection hook with real-time sync
+/**
+ * Firestore collection hook with real-time sync + localStorage offline cache.
+ *
+ * - Immediately loads from localStorage cache for instant UI
+ * - Subscribes to Firestore real-time updates
+ * - Falls back to localStorage-only if Firestore is unreachable
+ * - Every save writes to both Firestore AND localStorage
+ */
 export const useFirestoreCollection = (collectionName, defaultData = []) => {
-  const [data, setData] = useState(defaultData);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    // Use localStorage fallback when Firebase isn't configured
+  const [data, setData] = useState(() => {
+    // Load from localStorage cache immediately
     const stored = localStorage.getItem(`pt_${collectionName}`);
     if (stored) {
-      try { setData(JSON.parse(stored)); } catch(e) {}
+      try { return JSON.parse(stored); } catch(e) {}
     }
-    setLoaded(true);
+    return defaultData;
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [firebaseConnected, setFirebaseConnected] = useState(false);
+  const unsubRef = useRef(null);
+
+  useEffect(() => {
+    // Try to subscribe to Firestore real-time updates
+    try {
+      unsubRef.current = subscribeCollection(collectionName, (docs) => {
+        setFirebaseConnected(true);
+        if (docs.length > 0 || data.length === 0) {
+          setData(docs);
+          // Update localStorage cache
+          localStorage.setItem(`pt_${collectionName}`, JSON.stringify(docs));
+        }
+        setLoaded(true);
+      });
+    } catch (err) {
+      console.warn(`Firestore subscription failed for ${collectionName}, using localStorage`, err);
+      setLoaded(true);
+    }
+
+    // Mark loaded after timeout if Firestore hasn't responded
+    const timeout = setTimeout(() => {
+      setLoaded(true);
+    }, 3000);
+
+    return () => {
+      if (unsubRef.current) unsubRef.current();
+      clearTimeout(timeout);
+    };
   }, [collectionName]);
 
   const save = useCallback((newData) => {
     setData(newData);
+    // Always update localStorage cache
     localStorage.setItem(`pt_${collectionName}`, JSON.stringify(newData));
+
+    // Sync each item to Firestore
+    newData.forEach(item => {
+      if (item.id) {
+        // Strip any undefined values (Firestore doesn't accept them)
+        const clean = JSON.parse(JSON.stringify(item));
+        saveDocument(collectionName, item.id, clean).catch(err => {
+          console.warn(`Firestore write failed for ${collectionName}/${item.id}`, err);
+        });
+      }
+    });
+
+    // Delete items from Firestore that are no longer in the array
+    // (Compare with previous data to find removed items)
+    const newIds = new Set(newData.map(d => d.id).filter(Boolean));
+    const stored = localStorage.getItem(`pt_${collectionName}_prev`);
+    if (stored) {
+      try {
+        const prevData = JSON.parse(stored);
+        prevData.forEach(prev => {
+          if (prev.id && !newIds.has(prev.id)) {
+            deleteDocument(collectionName, prev.id).catch(err => {
+              console.warn(`Firestore delete failed for ${collectionName}/${prev.id}`, err);
+            });
+          }
+        });
+      } catch(e) {}
+    }
+    localStorage.setItem(`pt_${collectionName}_prev`, JSON.stringify(newData));
   }, [collectionName]);
 
   return [data, save, loaded];

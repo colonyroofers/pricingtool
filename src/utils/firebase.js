@@ -3,14 +3,14 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as fbSignOut } fr
 import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 
-// Firebase config - placeholder for user to fill in
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCawWMq5X2OpWsmplOYxrR6bhyHeAzXKFw",
+  authDomain: "colony-inspection-app.firebaseapp.com",
+  projectId: "colony-inspection-app",
+  storageBucket: "colony-inspection-app.firebasestorage.app",
+  messagingSenderId: "869437682472",
+  appId: "1:869437682472:web:61520f00da42339709d61d",
+  measurementId: "G-EHR286MB33"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -52,6 +52,17 @@ export const uploadFile = async (path, file) => {
   const storageRef = ref(storage, path);
   const snapshot = await uploadBytes(storageRef, file);
   return getDownloadURL(snapshot.ref);
+};
+
+export const uploadFileFromBlob = async (path, blob, metadata) => {
+  const storageRef = ref(storage, path);
+  const snapshot = await uploadBytes(storageRef, blob, metadata);
+  return getDownloadURL(snapshot.ref);
+};
+
+export const getFileURL = async (path) => {
+  const storageRef = ref(storage, path);
+  return getDownloadURL(storageRef);
 };
 
 export const deleteFile = async (path) => {

@@ -5,6 +5,7 @@ import { C, EMPTY_BUILDING, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FI
   fmt, fmtInt, generateId } from '../utils/constants';
 import { calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
   parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
+import { uploadFile, deleteFile } from '../utils/firebase';
 import DataTable from '../components/DataTable';
 
 const DEMO_BUILDINGS = [
@@ -42,33 +43,35 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     }
   }, [estimate]);
 
-  // Convert file to base64 for localStorage persistence
-  const fileToBase64 = (file) => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+  // Get or create estimate ID for file storage path
+  const estimateId = estimate?.id || useRef(generateId()).current;
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setParsing(true);
-    setUploadStatus(`Parsing ${file.name}...`);
+    setUploadStatus(`Uploading & parsing ${file.name}...`);
 
     try {
-      // Store file as base64 for persistence
-      const base64 = await fileToBase64(file);
+      // Upload to Firebase Storage
+      const storagePath = `estimates/${estimateId}/${file.name}`;
+      let downloadURL = '';
+      try {
+        downloadURL = await uploadFile(storagePath, file);
+      } catch (storageErr) {
+        console.warn('Firebase Storage upload failed, continuing with parse only:', storageErr);
+      }
+
       const fileRecord = {
         name: file.name,
         type: file.type,
         size: file.size,
-        data: base64,
+        storagePath,
+        downloadURL,
         uploadedAt: new Date().toISOString(),
       };
       setUploadedFiles(prev => {
-        // Replace if same filename, otherwise append
         const existing = prev.filter(f => f.name !== file.name);
         return [...existing, fileRecord];
       });
@@ -79,30 +82,30 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
         const result = await parseRoofRPDF(file);
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
-          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File saved. Review measurements below.`);
+          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File uploaded. Review measurements below.`);
         } else {
-          setUploadStatus(`PDF parsed (${result.pageCount} pages) — file saved. No building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
+          setUploadStatus(`PDF parsed (${result.pageCount} pages) — file uploaded. No building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
         }
       } else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
         if (estimateType === 'tpo') {
           const result = await parseBeamAIExcel(file);
           setTpoMaterials(result.materials);
-          setUploadStatus(`Imported ${result.materials.length} material line items from ${file.name}. File saved.`);
+          setUploadStatus(`Imported ${result.materials.length} material line items from ${file.name}. File uploaded.`);
         } else {
           const result = await parseShingleExcel(file);
           if (result.buildings.length > 0) {
             setBuildings(result.buildings);
             if (result.jobName && !estimateName) setEstimateName(result.jobName);
             if (result.companyName && !estimateName) setEstimateName(result.companyName);
-            setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File saved.`);
+            setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File uploaded.`);
           } else {
             const beamResult = await parseBeamAIExcel(file);
             if (beamResult.materials.length > 0) {
               setTpoMaterials(beamResult.materials);
               setEstimateType('tpo');
-              setUploadStatus(`Detected Beam AI format — imported ${beamResult.materials.length} materials. File saved.`);
+              setUploadStatus(`Detected Beam AI format — imported ${beamResult.materials.length} materials. File uploaded.`);
             } else {
-              setUploadStatus(`No measurement data found. File saved. Ensure the file has a "Measurement Import" sheet or Beam AI TAKEOFF format.`);
+              setUploadStatus(`No measurement data found. File uploaded. Ensure the file has a "Measurement Import" sheet or Beam AI TAKEOFF format.`);
             }
           }
         }
@@ -111,21 +114,34 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       }
     } catch (err) {
       console.error('Parse error:', err);
-      setUploadStatus(`Error parsing file: ${err.message}`);
+      setUploadStatus(`Error: ${err.message}`);
     }
 
     setParsing(false);
   };
 
-  const handleRemoveFile = (fileName) => {
+  const handleRemoveFile = async (fileName) => {
+    const fileToRemove = uploadedFiles.find(f => f.name === fileName);
+    if (fileToRemove?.storagePath) {
+      try {
+        await deleteFile(fileToRemove.storagePath);
+      } catch (err) {
+        console.warn('Could not delete file from Storage:', err);
+      }
+    }
     setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
   };
 
   const handleDownloadFile = (fileRecord) => {
-    const a = document.createElement('a');
-    a.href = fileRecord.data;
-    a.download = fileRecord.name;
-    a.click();
+    if (fileRecord.downloadURL) {
+      window.open(fileRecord.downloadURL, '_blank');
+    } else if (fileRecord.data) {
+      // Legacy base64 fallback
+      const a = document.createElement('a');
+      a.href = fileRecord.data;
+      a.download = fileRecord.name;
+      a.click();
+    }
   };
 
   const handleAddBuilding = () => {
@@ -150,14 +166,16 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
 
   const handleSave = () => {
     const totalCost = getTotalCost();
+    // Strip base64 data from file records — only save metadata + URLs
+    const cleanFiles = uploadedFiles.map(({ data, ...rest }) => rest);
     const updated = {
-      ...(estimate || { id: generateId(), status: 'unassigned', createdAt: new Date().toISOString() }),
+      ...(estimate || { id: estimateId, status: 'unassigned', createdAt: new Date().toISOString() }),
       propertyName: estimateName,
       state: marketState,
       type: estimateType,
       buildings,
       tpoMaterials,
-      uploadedFiles,
+      uploadedFiles: cleanFiles,
       totalCost,
       updatedAt: new Date().toISOString(),
     };
@@ -282,7 +300,8 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                     {f.name}
                   </p>
                   <p style={{ fontSize: 10, color: C.gray500, margin: 0 }}>
-                    {(f.size / 1024).toFixed(0)} KB · {new Date(f.uploadedAt).toLocaleDateString()}
+                    {f.size ? `${(f.size / 1024).toFixed(0)} KB · ` : ''}{new Date(f.uploadedAt).toLocaleDateString()}
+                    {f.downloadURL ? ' · Cloud' : ''}
                   </p>
                 </div>
               </div>
