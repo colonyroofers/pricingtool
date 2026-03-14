@@ -1493,17 +1493,31 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
           </ul>
 
           {/* Pricing */}
-          {proposalMode === 'itemized' && estimateType !== 'tpo' && (
-            <div style={{ marginBottom: 20 }}>
-              <h4 style={{ fontSize: 14, fontWeight: 600, color: C.navy, marginBottom: 8 }}>Pricing by Building</h4>
-              {(estimateType === 'tile' ? getTileCosts() : getShingleCosts()).rows.map((row, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${C.gray100}` }}>
-                  <span>Building {row.building}</span>
-                  <span style={{ fontWeight: 600 }}>{fmt(row.total)}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {proposalMode === 'itemized' && estimateType !== 'tpo' && (() => {
+            const costData = estimateType === 'tile' ? getTileCosts() : getShingleCosts();
+            const summary = costData.summary;
+            const numBldgs = buildings.length || 1;
+            const totalEquip = (jobForkliftCost || 0) + (jobDumpsterCost || 0) + (jobPermitCost || 0);
+            const equipPerBldg = totalEquip / numBldgs;
+            const marginRate = (jobMarginPercent || 25) / 100;
+
+            return (
+              <div style={{ marginBottom: 20 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 600, color: C.navy, marginBottom: 8 }}>Pricing by Building</h4>
+                {(summary ? summary.buildings : costData.rows).map((row, i) => {
+                  const bldgSub = row.materialCost + row.laborCost + row.warrantyCost + row.taxAmount + equipPerBldg;
+                  const bldgMargin = bldgSub / (1 - marginRate) - bldgSub;
+                  const bldgTotal = bldgSub + bldgMargin;
+                  return (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${C.gray100}` }}>
+                      <span>Building {buildings[i]?.siteplanNum || i + 1}</span>
+                      <span style={{ fontWeight: 600 }}>{fmt(bldgTotal)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <h4 style={{ fontSize: 14, fontWeight: 600, color: C.navy, marginBottom: 8 }}>Project Total</h4>
           <p style={{ fontSize: 20, fontWeight: 700, color: C.red, marginBottom: 20 }}>
@@ -1638,8 +1652,16 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         addText('Pricing by Building:', lm, 12, boldFont, navy);
         y -= 16;
         const costs = estimateType === 'tile' ? getTileCosts() : getShingleCosts();
-        costs.rows.forEach(row => {
-          addText(`Building ${row.building}: ${fmt(row.total)}`, lm, 10, font, gray);
+        const pdfSummary = costs.summary;
+        const pdfNumBldgs = buildings.length || 1;
+        const pdfTotalEquip = (jobForkliftCost || 0) + (jobDumpsterCost || 0) + (jobPermitCost || 0);
+        const pdfEquipPerBldg = pdfTotalEquip / pdfNumBldgs;
+        const pdfMarginRate = (jobMarginPercent || 25) / 100;
+        (pdfSummary ? pdfSummary.buildings : costs.rows).forEach((row, i) => {
+          const sub = row.materialCost + row.laborCost + row.warrantyCost + row.taxAmount + pdfEquipPerBldg;
+          const mrg = sub / (1 - pdfMarginRate) - sub;
+          const bTotal = sub + mrg;
+          addText(`Building ${buildings[i]?.siteplanNum || i + 1}: ${fmt(bTotal)}`, lm, 10, font, gray);
           y -= 14;
         });
         y -= 10;
