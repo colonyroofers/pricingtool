@@ -49,6 +49,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const [jobForkliftCost, setJobForkliftCost] = useState(estimate?.jobForkliftCost ?? 0);
   const [jobDumpsterCost, setJobDumpsterCost] = useState(estimate?.jobDumpsterCost ?? 0);
   const [jobPermitCost, setJobPermitCost] = useState(estimate?.jobPermitCost ?? 0);
+  const defaultMargin = (STATE_FINANCIALS[estimate?.state || 'FL']?.margin ?? 0.25) * 100;
+  const [jobMarginPercent, setJobMarginPercent] = useState(estimate?.jobMarginPercent ?? defaultMargin);
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
@@ -120,6 +122,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       setJobForkliftCost(estimate.jobForkliftCost ?? 0);
       setJobDumpsterCost(estimate.jobDumpsterCost ?? 0);
       setJobPermitCost(estimate.jobPermitCost ?? 0);
+      const stateMargin = (STATE_FINANCIALS[estimate.state || 'FL']?.margin ?? 0.25) * 100;
+      setJobMarginPercent(estimate.jobMarginPercent ?? stateMargin);
       if (estimate.uploadedFiles?.length > 0) {
         setUploadedFiles(estimate.uploadedFiles);
         setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
@@ -465,6 +469,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         jobForkliftCost,
         jobDumpsterCost,
         jobPermitCost,
+        jobMarginPercent,
         updatedAt: new Date().toISOString(),
       };
       onSave(updated);
@@ -485,7 +490,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       return;
     }
     setHasUnsavedChanges(true);
-  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost]);
+  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent]);
 
   // Warn before leaving if there are unsaved changes
   useEffect(() => {
@@ -516,9 +521,10 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   // ==================== COST CALCULATIONS ====================
 
   const getShingleCosts = () => {
-    // Use the new estimate-level calculator with job-specific equipment costs
+    // Use the new estimate-level calculator with job-specific equipment costs and margin
     const equipmentOverride = { forklift: jobForkliftCost, dumpster: jobDumpsterCost, permit: jobPermitCost };
-    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride);
+    const marginDecimal = (jobMarginPercent || 25) / 100;
+    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride, marginDecimal);
     const rows = result.buildings.map((cost, i) => ({
       building: buildings[i]?.siteplanNum || String(i + 1),
       ...cost,
@@ -802,16 +808,37 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
           </div>
         )}
 
+        {/* Margin setting */}
         <div style={{
           backgroundColor: C.gray100, padding: 16, borderRadius: 8,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          border: `1px solid ${C.gray200}`,
         }}>
-          <span style={{ fontSize: 12, color: C.gray500 }}>
-            Margin: {(stFin.margin * 100).toFixed(0)}% · Tax: {(stFin.taxRate * 100).toFixed(1)}%
-          </span>
-          <span style={{ fontSize: 11, color: C.gray400 }}>
-            Final pricing with margin shown in Pricing tab →
-          </span>
+          <p style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 12 }}>
+            Margin &amp; Tax
+          </p>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ flex: '0 0 160px' }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Margin %</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.5"
+                value={jobMarginPercent}
+                onChange={(e) => setJobMarginPercent(parseFloat(e.target.value) || 0)}
+                style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.gray300}`, borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ flex: '0 0 160px' }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: C.gray600, display: 'block', marginBottom: 4 }}>Tax Rate</label>
+              <p style={{ fontSize: 13, color: C.gray700, margin: '8px 0' }}>{(stFin.taxRate * 100).toFixed(1)}% (state default)</p>
+            </div>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 11, color: C.gray400 }}>
+                Final pricing with margin shown in Pricing tab →
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1020,19 +1047,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const renderStep3 = () => {
     const warnings = BUILDING_CODE_WARNINGS[marketState] || [];
 
-    // Low margin warning banner
-    const getTotalMargin = () => {
-      const costs = estimateType === 'tile' ? getTileCosts() : estimateType === 'tpo' ? getTPOCosts() : getShingleCosts();
-      const total = costs.total || 0;
-      const subtotal = total / (1 + (STATE_FINANCIALS[marketState]?.margin || 0.25));
-      return total - subtotal;
-    };
-
-    const marginPercent = (() => {
-      const totalCost = getTotalCost();
-      const margin = getTotalMargin();
-      return totalCost > 0 ? (margin / totalCost) * 100 : 0;
-    })();
+    // Margin percent — use the job-level override
+    const marginPercent = jobMarginPercent || 25;
 
     if (estimateType === 'tpo') {
       const tpoCosts = getTPOCosts();
@@ -1086,7 +1102,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
     const pricingRows = costData.rows.map(row => {
       const bldgSubtotal = (row.materialCost || 0) + (row.laborCost || 0) + (row.tearOffCost || 0)
         + (row.warrantyCost || 0) + forkliftPer + dumpsterPer + permitPer + (row.taxAmount || 0);
-      const bldgMargin = bldgSubtotal / (1 - stFin.margin) - bldgSubtotal;
+      const jobMarginDecimal = (jobMarginPercent || 25) / 100;
+      const bldgMargin = bldgSubtotal / (1 - jobMarginDecimal) - bldgSubtotal;
       const bldgTotal = bldgSubtotal + bldgMargin;
       return { ...row, forklift: forkliftPer, dumpster: dumpsterPer, permit: permitPer, margin: bldgMargin, bldgTotal };
     });
@@ -1191,7 +1208,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Permit</th>
                 <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Tax ({(stFin.taxRate * 100).toFixed(1)}%)</th>
                 {canViewMargin && (
-                  <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Margin ({(stFin.margin * 100).toFixed(0)}%)</th>
+                  <th style={{ ...ssHead, color: C.white, borderRight: `1px solid ${C.navyLight}` }}>Margin ({(jobMarginPercent || 25).toFixed(0)}%)</th>
                 )}
                 <th style={{ ...ssHead, color: C.white }}>Total</th>
               </tr>
