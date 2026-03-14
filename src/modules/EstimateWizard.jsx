@@ -98,6 +98,12 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     }]);
   };
 
+  const handleDeleteBuilding = (index) => {
+    if (buildings.length <= 1) return;
+    const updated = buildings.filter((_, i) => i !== index);
+    setBuildings(updated);
+  };
+
   const handleLoadDemo = () => {
     setBuildings(DEMO_BUILDINGS);
     setEstimateName('Willow Bridge');
@@ -298,7 +304,8 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
             + Add Building
           </button>
         </div>
-        <DataTable columns={shingleColumns} data={buildings} onDataChange={setBuildings} searchable={false} />
+        <DataTable columns={shingleColumns} data={buildings} onDataChange={setBuildings} searchable={false}
+          onDeleteRow={handleDeleteBuilding} roundDecimals={2} />
       </div>
     );
   };
@@ -613,7 +620,9 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
                 backgroundColor: i + 1 <= step ? C.red : C.gray200,
                 cursor: 'pointer', transition: 'background-color 0.2s',
               }} onClick={() => setStep(i + 1)} />
-              <span style={{ fontSize: 11, color: i + 1 === step ? C.red : C.gray400, fontWeight: i + 1 === step ? 600 : 400 }}>
+              <span
+                onClick={() => setStep(i + 1)}
+                style={{ fontSize: 11, color: i + 1 === step ? C.red : C.gray400, fontWeight: i + 1 === step ? 600 : 400, cursor: 'pointer' }}>
                 {s}
               </span>
             </div>

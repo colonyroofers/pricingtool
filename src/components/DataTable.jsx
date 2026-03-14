@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { C } from '../utils/constants';
 
-export default function DataTable({ columns, data, onDataChange, searchable = true }) {
+export default function DataTable({ columns, data, onDataChange, searchable = true, onDeleteRow, roundDecimals }) {
   const [search, setSearch] = useState('');
   const [editingCell, setEditingCell] = useState(null);
 
@@ -18,6 +18,13 @@ export default function DataTable({ columns, data, onDataChange, searchable = tr
     newData[rowIndex] = { ...newData[rowIndex], [colKey]: newValue };
     onDataChange(newData);
     setEditingCell(null);
+  };
+
+  const formatValue = (val, col) => {
+    if (roundDecimals != null && col.type === 'number' && typeof val === 'number' && !Number.isInteger(val)) {
+      return parseFloat(val.toFixed(roundDecimals));
+    }
+    return val;
   };
 
   return (
@@ -66,6 +73,18 @@ export default function DataTable({ columns, data, onDataChange, searchable = tr
                   {col.label}
                 </th>
               ))}
+              {onDeleteRow && (
+                <th style={{
+                  padding: '12px 8px',
+                  textAlign: 'center',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: C.gray700,
+                  borderBottom: `1px solid ${C.gray200}`,
+                  width: 44,
+                }}>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -106,11 +125,31 @@ export default function DataTable({ columns, data, onDataChange, searchable = tr
                       />
                     ) : (
                       <span style={{ cursor: col.editable ? 'pointer' : 'default' }}>
-                        {row[col.key]}
+                        {formatValue(row[col.key], col)}
                       </span>
                     )}
                   </td>
                 ))}
+                {onDeleteRow && (
+                  <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                    <button
+                      onClick={() => onDeleteRow(rowIndex)}
+                      title="Delete row"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: data.length > 1 ? 'pointer' : 'not-allowed',
+                        fontSize: 14,
+                        color: data.length > 1 ? C.red : C.gray300,
+                        padding: '2px 4px',
+                        borderRadius: 4,
+                        opacity: data.length > 1 ? 1 : 0.5,
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
