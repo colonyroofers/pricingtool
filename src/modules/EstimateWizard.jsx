@@ -55,6 +55,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const [jobMarginPercent, setJobMarginPercent] = useState(estimate?.jobMarginPercent ?? defaultMargin);
   const defaultTaxRate = (STATE_FINANCIALS[estimate?.state || 'FL']?.taxRate ?? 0.075) * 100;
   const [jobTaxPercent, setJobTaxPercent] = useState(estimate?.jobTaxPercent ?? defaultTaxRate);
+  const [warrantyEnabled, setWarrantyEnabled] = useState(estimate?.warrantyEnabled !== false);
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
@@ -130,6 +131,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       setJobMarginPercent(estimate.jobMarginPercent ?? stateMargin);
       const stateTax = (STATE_FINANCIALS[estimate.state || 'FL']?.taxRate ?? 0.075) * 100;
       setJobTaxPercent(estimate.jobTaxPercent ?? stateTax);
+      setWarrantyEnabled(estimate.warrantyEnabled !== false);
       if (estimate.uploadedFiles?.length > 0) {
         setUploadedFiles(estimate.uploadedFiles);
         setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
@@ -470,6 +472,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         jobPermitCost,
         jobMarginPercent,
         jobTaxPercent,
+        warrantyEnabled,
         updatedAt: new Date().toISOString(),
       };
       // Add audit trail entry directly to the updated object (don't call addAuditEntry
@@ -508,7 +511,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       return;
     }
     setHasUnsavedChanges(true);
-  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent, jobTaxPercent]);
+  }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent, jobTaxPercent, warrantyEnabled]);
 
   // Warn before leaving if there are unsaved changes
   useEffect(() => {
@@ -543,7 +546,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
     const equipmentOverride = { forklift: jobForkliftCost, dumpster: jobDumpsterCost, permit: jobPermitCost };
     const marginDecimal = (jobMarginPercent || 25) / 100;
     const taxDecimal = (jobTaxPercent || 7.5) / 100;
-    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride, marginDecimal, taxDecimal);
+    const result = calculateEstimateCost(buildings, DEFAULT_SHINGLE_MATERIALS, marketState, equipmentOverride, marginDecimal, taxDecimal, warrantyEnabled);
     const rows = result.buildings.map((cost, i) => ({
       building: buildings[i]?.siteplanNum || String(i + 1),
       ...cost,
@@ -743,7 +746,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(laborSquares * stLabor.tearOffPerSquare)}</td>
                     </tr>
                   )}
-                  {estimateType !== 'tile' && (
+                  {estimateType !== 'tile' && warrantyEnabled && (
                     <tr style={{ backgroundColor: C.blueBg }}>
                       <td style={tdStyle}>Warranty ({laborSquares} SQ × {fmt(stLabor.warrantyPerSq)}/SQ)</td>
                       <td style={{ ...tdStyle, textAlign: 'center' }}>{laborSquares}</td>
@@ -758,7 +761,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
               {/* Building subtotal */}
               {(() => {
                 const tearOff = estimateType !== 'tile' ? laborSquares * stLabor.tearOffPerSquare : 0;
-                const warranty = estimateType !== 'tile' ? laborSquares * stLabor.warrantyPerSq : 0;
+                const warranty = (estimateType !== 'tile' && warrantyEnabled) ? laborSquares * stLabor.warrantyPerSq : 0;
                 const bldgSubtotal = matTotal + laborCost + tearOff + warranty + matTotal * (jobTaxPercent / 100);
                 return (
                   <div style={{
@@ -766,7 +769,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}>
                     <span style={{ fontSize: 12, color: C.gray600 }}>
-                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost + tearOff)} · Warranty: {fmt(warranty)} · Tax ({(jobTaxPercent || 7.5).toFixed(1)}%): {fmt(matTotal * (jobTaxPercent / 100))}
+                      Material: {fmt(matTotal)} · Labor: {fmt(laborCost + tearOff)}{warrantyEnabled ? ` · Warranty: ${fmt(warranty)}` : ''} · Tax ({(jobTaxPercent || 7.5).toFixed(1)}%): {fmt(matTotal * (jobTaxPercent / 100))}
                     </span>
                     <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>
                       Subtotal: {fmt(bldgSubtotal)}
@@ -824,6 +827,40 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Warranty toggle */}
+        {estimateType !== 'tile' && (
+          <div style={{
+            backgroundColor: C.gray100, padding: 16, borderRadius: 8,
+            border: `1px solid ${C.gray200}`,
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: C.navy, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                onClick={() => setWarrantyEnabled(!warrantyEnabled)}
+                style={{
+                  width: 40, height: 22, borderRadius: 11, cursor: 'pointer',
+                  backgroundColor: warrantyEnabled ? '#22C55E' : C.gray300,
+                  position: 'relative', transition: 'background-color 0.2s',
+                }}
+              >
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%', backgroundColor: C.white,
+                  position: 'absolute', top: 2,
+                  left: warrantyEnabled ? 20 : 2,
+                  transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }} />
+              </div>
+              Warranty Included
+            </label>
+            {!warrantyEnabled && (
+              <span style={{ fontSize: 11, color: '#DC2626', fontWeight: 500 }}>
+                Warranty costs removed from all buildings
+              </span>
+            )}
           </div>
         )}
 

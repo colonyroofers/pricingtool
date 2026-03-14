@@ -157,7 +157,7 @@ export const calculateBuildingCost = (building, materials, labor, financials, st
  * Calculate full estimate cost across all buildings with equipment split.
  * Equipment (forklift, dumpster, permit) is split evenly across buildings.
  */
-export const calculateEstimateCost = (buildings, materials, state, equipmentOverride, marginOverride, taxOverride) => {
+export const calculateEstimateCost = (buildings, materials, state, equipmentOverride, marginOverride, taxOverride, warrantyEnabled = true) => {
   const stLabor = STATE_LABOR[state] || STATE_LABOR.FL;
   const stFin = STATE_FINANCIALS[state] || STATE_FINANCIALS.FL;
   const numBuildings = buildings.length || 1;
@@ -187,9 +187,9 @@ export const calculateEstimateCost = (buildings, materials, state, equipmentOver
     grandMaterialCost += result.materialCost;
     grandLaborCost += result.laborCost;
     grandTearOffCost += result.tearOffCost;
-    grandWarrantyCost += result.warrantyCost;
+    grandWarrantyCost += warrantyEnabled ? result.warrantyCost : 0;
     grandTaxAmount += bldgTax;
-    return { ...result, taxAmount: bldgTax, equipmentCost: equipmentPerBuilding };
+    return { ...result, taxAmount: bldgTax, equipmentCost: equipmentPerBuilding, warrantyCost: warrantyEnabled ? result.warrantyCost : 0 };
   });
 
   const grandSubtotal = grandMaterialCost + grandLaborCost + grandTearOffCost + grandWarrantyCost + totalEquipment + grandTaxAmount;
