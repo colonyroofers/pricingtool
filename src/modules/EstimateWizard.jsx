@@ -49,6 +49,64 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   const fileInputRef = useRef(null);
   const isInitialRender = useRef(true);
 
+  // Re-parse uploaded files to recover buildings/materials when data is missing
+  const reparseUploadedFiles = async (files) => {
+    setParsing(true);
+    setUploadStatus('Re-parsing saved files to recover measurements...');
+    let allBuildings = [];
+    let allTpoMaterials = [];
+
+    for (const fileRecord of files) {
+      try {
+        const ext = fileRecord.name.toLowerCase().split('.').pop();
+        if (!fileRecord.downloadURL) continue;
+
+        // Fetch the file from Firebase Storage
+        const response = await fetch(fileRecord.downloadURL);
+        const blob = await response.blob();
+        const file = new File([blob], fileRecord.name, { type: blob.type });
+
+        if (ext === 'pdf') {
+          const result = await parseRoofRPDF(file);
+          if (result.buildings.length > 0) {
+            allBuildings = [...allBuildings, ...result.buildings];
+          }
+        } else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+          if (estimateType === 'tpo') {
+            const result = await parseBeamAIExcel(file);
+            if (result.materials.length > 0) {
+              allTpoMaterials = [...allTpoMaterials, ...result.materials];
+            }
+          } else {
+            const result = await parseShingleExcel(file);
+            if (result.buildings.length > 0) {
+              allBuildings = [...allBuildings, ...result.buildings];
+            } else {
+              // Try Beam AI format
+              const beamResult = await parseBeamAIExcel(file);
+              if (beamResult.materials.length > 0) {
+                allTpoMaterials = [...allTpoMaterials, ...beamResult.materials];
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`Failed to re-parse ${fileRecord.name}:`, err);
+      }
+    }
+
+    if (allBuildings.length > 0) {
+      setBuildings(allBuildings);
+      setUploadStatus(`Recovered ${allBuildings.length} building(s) from saved files. Review measurements below.`);
+    } else if (allTpoMaterials.length > 0) {
+      setTpoMaterials(allTpoMaterials);
+      setUploadStatus(`Recovered ${allTpoMaterials.length} material line items from saved files.`);
+    } else {
+      setUploadStatus(`${files.length} file(s) saved but could not auto-parse measurements. Try re-uploading.`);
+    }
+    setParsing(false);
+  };
+
   useEffect(() => {
     if (estimate) {
       setEstimateName(estimate.propertyName || '');
@@ -59,6 +117,13 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
       if (estimate.uploadedFiles?.length > 0) {
         setUploadedFiles(estimate.uploadedFiles);
         setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
+
+        // If files exist but no buildings/materials loaded, re-parse from saved files
+        const hasNoData = (!estimate.buildings || estimate.buildings.length === 0) &&
+                          (!estimate.tpoMaterials || estimate.tpoMaterials.length === 0);
+        if (hasNoData) {
+          reparseUploadedFiles(estimate.uploadedFiles);
+        }
       }
     }
   }, [estimate]);
