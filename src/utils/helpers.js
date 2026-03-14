@@ -352,7 +352,7 @@ export const parseRoofRPDF = async (file) => {
 
       // If we got a valid area, this is a real building
       if (totalArea > 0) {
-        buildings.push({
+        const bldgData = {
           siteplanNum: String(num),
           roofrNum: String(num),
           phase: 1,
@@ -360,12 +360,14 @@ export const parseRoofRPDF = async (file) => {
           pitchedArea: pitchedArea || totalArea,
           flatArea,
           predominantPitch: pitch,
-          wastePercent: 12,
+          wastePercent: 12, // placeholder, calculated below
           eaves, valleys, hips, ridges, rakes,
           wallFlashing, stepFlashing,
           pipes: 0,
           dryerVents: 0,
-        });
+        };
+        bldgData.wastePercent = calculateWastePercent(bldgData);
+        buildings.push(bldgData);
       }
     }
   }
@@ -375,7 +377,7 @@ export const parseRoofRPDF = async (file) => {
     // Try to find any building-like data patterns
     const areaMatches = [...allText.matchAll(/(?:Total\s*roof\s*area|Area)[:\s]*([\d,]+(?:\.\d+)?)\s*(?:sqft|sq\s*ft|SF)/gi)];
     areaMatches.forEach((m, idx) => {
-      buildings.push({
+      const bldgData = {
         siteplanNum: String(idx + 1),
         roofrNum: String(idx + 1),
         phase: 1,
@@ -383,10 +385,12 @@ export const parseRoofRPDF = async (file) => {
         pitchedArea: parseFloat(m[1].replace(/,/g, '')),
         flatArea: 0,
         predominantPitch: '4/12',
-        wastePercent: 12,
+        wastePercent: 10,
         eaves: 0, valleys: 0, hips: 0, ridges: 0, rakes: 0,
         wallFlashing: 0, stepFlashing: 0, pipes: 0, dryerVents: 0,
-      });
+      };
+      bldgData.wastePercent = calculateWastePercent(bldgData);
+      buildings.push(bldgData);
     });
   }
 
@@ -512,7 +516,7 @@ export const parseShingleExcel = async (file) => {
         }
       }
 
-      result.buildings.push({
+      const bldgData = {
         siteplanNum: bldgNum,
         roofrNum: bldgNum,
         phase: 1,
@@ -522,7 +526,7 @@ export const parseShingleExcel = async (file) => {
         twoStory: row[4] ? true : false,
         twoLayer: row[5] ? true : false,
         predominantPitch,
-        wastePercent: 12,
+        wastePercent: 12, // placeholder
         eaves: parseFloat(row[6]) || 0,
         valleys: parseFloat(row[7]) || 0,
         hips: parseFloat(row[8]) || 0,
@@ -532,7 +536,9 @@ export const parseShingleExcel = async (file) => {
         stepFlashing: parseFloat(row[12]) || 0,
         pipes: 0,
         dryerVents: 0,
-      });
+      };
+      bldgData.wastePercent = calculateWastePercent(bldgData);
+      result.buildings.push(bldgData);
     }
   }
 
@@ -549,6 +555,43 @@ export const parseShingleExcel = async (file) => {
   }
 
   return result;
+};
+
+// ==================== WASTE CALCULATION ====================
+
+/**
+ * Calculate waste percentage per building based on pitch and roof complexity.
+ * Matches the Colony Roofers spreadsheet approach:
+ *   - Base waste determined by predominant pitch
+ *   - Complexity adjustment from valleys, hips, and cuts relative to roof area
+ * Still editable in the Measurements table — this is the auto-calc default.
+ */
+export const calculateWastePercent = (building) => {
+  const { totalArea = 0, predominantPitch = '4/12', valleys = 0, hips = 0, rakes = 0 } = building;
+
+  // Parse pitch string "X/12" → number
+  const pitchNum = parseInt(predominantPitch) || 4;
+
+  // Base waste from pitch
+  let base;
+  if (pitchNum <= 2) base = 7;
+  else if (pitchNum <= 4) base = 10;
+  else if (pitchNum <= 6) base = 12;
+  else if (pitchNum <= 8) base = 15;
+  else if (pitchNum <= 10) base = 18;
+  else base = 20;
+
+  // Complexity factor: valleys + hips relative to area increase waste
+  // More cuts = more scrap
+  if (totalArea > 0) {
+    const cutLF = valleys + hips;
+    const complexityRatio = cutLF / totalArea;
+    // Every 0.01 ratio ≈ 1% additional waste, capped at +5%
+    const complexityAdj = Math.min(5, Math.round(complexityRatio * 100));
+    base += complexityAdj;
+  }
+
+  return Math.max(5, Math.min(25, base));
 };
 
 // ==================== UTILITIES ====================

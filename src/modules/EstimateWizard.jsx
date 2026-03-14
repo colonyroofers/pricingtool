@@ -4,7 +4,7 @@ import { C, EMPTY_BUILDING, DEFAULT_SHINGLE_MATERIALS, DEFAULT_LABOR, DEFAULT_FI
   BUILDING_CODE_WARNINGS, SCOPE_ITEMS, UNIT_COSTS_TEXT, EXCLUSIONS, TPO_DEFAULT_LABOR,
   fmt, fmtInt, generateId } from '../utils/constants';
 import { calculateShingleMaterials, calculateBuildingCost, calculateEstimateCost, calculateTPOCost, calculateTileCost,
-  parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
+  calculateWastePercent, parseRoofRPDF, parseBeamAIExcel, parseShingleExcel } from '../utils/helpers';
 import { uploadFile, deleteFile } from '../utils/firebase';
 import DataTable from '../components/DataTable';
 
@@ -118,7 +118,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     }
 
     setParsing(false);
+
+    // Auto-save so file metadata persists to Firestore immediately
+    // (don't wait for the user to click Save — files should survive 500+ days)
+    autoSaveRef.current = true;
   };
+
+  // Auto-save effect: when autoSaveRef is flagged, save the estimate
+  const autoSaveRef = useRef(false);
+  useEffect(() => {
+    if (autoSaveRef.current) {
+      autoSaveRef.current = false;
+      handleSave();
+    }
+  });
 
   const handleRemoveFile = async (fileName) => {
     const fileToRemove = uploadedFiles.find(f => f.name === fileName);
@@ -130,6 +143,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       }
     }
     setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
+    autoSaveRef.current = true; // persist removal to Firestore
   };
 
   const handleDownloadFile = (fileRecord) => {
