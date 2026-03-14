@@ -23,7 +23,7 @@ export default function App() {
   const [activeNav, setActiveNav] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isMobile = useIsMobile();
-  const [estimates, setEstimates] = useFirestoreCollection('estimates', []);
+  const [estimates, setEstimates, , removeEstimate] = useFirestoreCollection('estimates', []);
   const [team, setTeam] = useFirestoreCollection('team', DEFAULT_TEAM);
   const [demoMode, setDemoMode] = useState(new URLSearchParams(window.location.search).get('demo') === 'true');
   const [activeEstimate, setActiveEstimate] = useState(null);
@@ -87,7 +87,7 @@ export default function App() {
   };
 
   const handleDeleteEstimate = (estimateId) => {
-    setEstimates(estimates.filter(e => e.id !== estimateId));
+    removeEstimate(estimateId);
   };
 
   const handleStatusChange = (estimateId, newStatus) => {

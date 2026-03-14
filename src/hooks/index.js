@@ -23,9 +23,10 @@ export const useAuth = () => {
  * Firestore collection hook with real-time sync + localStorage offline cache.
  *
  * - Immediately loads from localStorage cache for instant UI
- * - Subscribes to Firestore real-time updates
+ * - Subscribes to Firestore real-time updates (source of truth)
  * - Falls back to localStorage-only if Firestore is unreachable
- * - Every save writes to both Firestore AND localStorage
+ * - Saves write to both Firestore AND localStorage
+ * - Deletes are EXPLICIT only — never inferred from array diffs
  */
 export const useFirestoreCollection = (collectionName, defaultData = []) => {
   const [data, setData] = useState(() => {
@@ -37,17 +38,23 @@ export const useFirestoreCollection = (collectionName, defaultData = []) => {
     return defaultData;
   });
   const [loaded, setLoaded] = useState(false);
-  const [firebaseConnected, setFirebaseConnected] = useState(false);
+  const firestoreLoadedRef = useRef(false);
+  const dataRef = useRef(data);
   const unsubRef = useRef(null);
+
+  // Keep dataRef in sync so subscription callback has current data
+  useEffect(() => { dataRef.current = data; }, [data]);
 
   useEffect(() => {
     // Try to subscribe to Firestore real-time updates
     try {
       unsubRef.current = subscribeCollection(collectionName, (docs) => {
-        setFirebaseConnected(true);
-        if (docs.length > 0 || data.length === 0) {
+        firestoreLoadedRef.current = true;
+        // Firestore is the source of truth when it has data.
+        // Only ignore empty Firestore results if we already have local data
+        // (protects against brief empty snapshots during connection init)
+        if (docs.length > 0 || dataRef.current.length === 0) {
           setData(docs);
-          // Update localStorage cache
           localStorage.setItem(`pt_${collectionName}`, JSON.stringify(docs));
         }
         setLoaded(true);
@@ -68,42 +75,35 @@ export const useFirestoreCollection = (collectionName, defaultData = []) => {
     };
   }, [collectionName]);
 
+  // Save: upserts items to Firestore. Does NOT delete anything.
   const save = useCallback((newData) => {
     setData(newData);
-    // Always update localStorage cache
     localStorage.setItem(`pt_${collectionName}`, JSON.stringify(newData));
 
     // Sync each item to Firestore
     newData.forEach(item => {
       if (item.id) {
-        // Strip any undefined values (Firestore doesn't accept them)
         const clean = JSON.parse(JSON.stringify(item));
         saveDocument(collectionName, item.id, clean).catch(err => {
           console.warn(`Firestore write failed for ${collectionName}/${item.id}`, err);
         });
       }
     });
-
-    // Delete items from Firestore that are no longer in the array
-    // (Compare with previous data to find removed items)
-    const newIds = new Set(newData.map(d => d.id).filter(Boolean));
-    const stored = localStorage.getItem(`pt_${collectionName}_prev`);
-    if (stored) {
-      try {
-        const prevData = JSON.parse(stored);
-        prevData.forEach(prev => {
-          if (prev.id && !newIds.has(prev.id)) {
-            deleteDocument(collectionName, prev.id).catch(err => {
-              console.warn(`Firestore delete failed for ${collectionName}/${prev.id}`, err);
-            });
-          }
-        });
-      } catch(e) {}
-    }
-    localStorage.setItem(`pt_${collectionName}_prev`, JSON.stringify(newData));
   }, [collectionName]);
 
-  return [data, save, loaded];
+  // Explicit delete: removes a single item by ID from Firestore + local state
+  const remove = useCallback((itemId) => {
+    setData(prev => {
+      const updated = prev.filter(d => d.id !== itemId);
+      localStorage.setItem(`pt_${collectionName}`, JSON.stringify(updated));
+      return updated;
+    });
+    deleteDocument(collectionName, itemId).catch(err => {
+      console.warn(`Firestore delete failed for ${collectionName}/${itemId}`, err);
+    });
+  }, [collectionName]);
+
+  return [data, save, loaded, remove];
 };
 
 // Online status hook
