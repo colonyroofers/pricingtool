@@ -867,6 +867,97 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
             </div>
           </div>
         </div>
+
+        {/* ── Cost Summary Table (matches Pricing page numbers) ── */}
+        {buildings.length > 0 && estimateType !== 'tpo' && (() => {
+          const costData = estimateType === 'tile' ? getTileCosts() : getShingleCosts();
+          const summary = costData.summary;
+          // For tile we don't have the full summary breakdown, so only show for shingle
+          if (!summary) return null;
+          const numBldgs = buildings.length || 1;
+          const equipForklift = jobForkliftCost || 0;
+          const equipDumpster = jobDumpsterCost || 0;
+          const equipPermit = jobPermitCost || 0;
+          const totalEquip = equipForklift + equipDumpster + equipPermit;
+          const equipPerBldg = totalEquip / numBldgs;
+
+          return (
+            <div style={{ border: `1px solid ${C.gray200}`, borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ backgroundColor: C.navy, padding: '10px 16px' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.white }}>
+                  Cost Summary — All Buildings
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+                  <thead>
+                    <tr style={{ backgroundColor: C.gray50 }}>
+                      <th style={thStyle}>Bldg</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Material</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Labor</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Tearoff</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Warranty</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Tax</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>Equipment</th>
+                      <th style={{ ...thStyle, textAlign: 'right', fontWeight: 700 }}>Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.buildings.map((b, i) => {
+                      const bldgSub = b.materialCost + b.laborCost + b.tearOffCost + b.warrantyCost + b.taxAmount + equipPerBldg;
+                      return (
+                        <tr key={i} style={{ backgroundColor: i % 2 === 0 ? C.white : C.gray50, borderBottom: `1px solid ${C.gray200}` }}>
+                          <td style={tdStyle}>{buildings[i]?.siteplanNum || i + 1}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.materialCost)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.laborCost)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.tearOffCost)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.warrantyCost)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(b.taxAmount)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right' }}>{fmt(equipPerBldg)}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(bldgSub)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    {/* Subtotal row */}
+                    <tr style={{ backgroundColor: C.gray100, borderTop: `2px solid ${C.gray300}` }}>
+                      <td style={{ ...tdStyle, fontWeight: 700 }}>Subtotal</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalMaterial)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalLabor)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalTearOff)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalWarranty)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(summary.totalTax)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmt(totalEquip)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmt(summary.grandTotal - summary.totalMargin)}</td>
+                    </tr>
+                    {/* Equipment breakdown */}
+                    {totalEquip > 0 && (
+                      <tr style={{ backgroundColor: C.gray50 }}>
+                        <td colSpan={5} style={{ ...tdStyle, fontSize: 11, color: C.gray500 }}>
+                          Equipment: Forklift {fmt(equipForklift)} · Dumpster {fmt(equipDumpster)} · Permit {fmt(equipPermit)}
+                        </td>
+                        <td colSpan={3} />
+                      </tr>
+                    )}
+                    {/* Margin row */}
+                    <tr style={{ backgroundColor: '#FFF8E1' }}>
+                      <td style={{ ...tdStyle, fontWeight: 700 }}>Margin ({jobMarginPercent}%)</td>
+                      <td colSpan={6} />
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#E65100' }}>{fmt(summary.totalMargin)}</td>
+                    </tr>
+                    {/* Grand total */}
+                    <tr style={{ backgroundColor: C.navy }}>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: C.white, fontSize: 14 }}>Grand Total</td>
+                      <td colSpan={6} />
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: C.white, fontSize: 14 }}>{fmt(summary.grandTotal)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   };
