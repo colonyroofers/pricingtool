@@ -6,7 +6,7 @@ export default function KanbanBoard({ estimates, onStatusChange, onCardClick, on
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
 
-  const estimators = (team || []).filter(t => t.role === 'estimator' && t.active);
+  const estimators = (team || []).filter(t => ['lead_estimator', 'staff_estimator', 'estimator'].includes(t.role) && t.active);
 
   const handleDragStart = (e, estimate) => {
     setDraggedItem(estimate);

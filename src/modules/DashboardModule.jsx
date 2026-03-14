@@ -15,7 +15,7 @@ const inputStyle = {
 };
 
 export default function DashboardModule({ estimates, onAddEstimate, onStatusChange, onOpenEstimate, onDeleteEstimate, onUpdateEstimate, team = [], currentUser = {}, onDuplicate, canViewMargin = false }) {
-  const ESTIMATORS = (team || []).filter(t => t.role === 'estimator' && t.active).map(t => ({ name: t.name, value: t.name }));
+  const ESTIMATORS = (team || []).filter(t => ['lead_estimator', 'staff_estimator', 'estimator'].includes(t.role) && t.active).map(t => ({ name: t.name, value: t.name }));
   const { showToast } = useToast();
   const [showNewModal, setShowNewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
