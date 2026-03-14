@@ -25,6 +25,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
   const [uploadStatus, setUploadStatus] = useState('');
   const [parsing, setParsing] = useState(false);
   const [proposalMode, setProposalMode] = useState('total'); // 'total' or 'itemized'
+  const [uploadedFiles, setUploadedFiles] = useState(estimate?.uploadedFiles || []);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -34,8 +35,20 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       setEstimateType(estimate.type || 'shingle');
       if (estimate.buildings?.length > 0) setBuildings(estimate.buildings);
       if (estimate.tpoMaterials?.length > 0) setTpoMaterials(estimate.tpoMaterials);
+      if (estimate.uploadedFiles?.length > 0) {
+        setUploadedFiles(estimate.uploadedFiles);
+        setUploadStatus(`${estimate.uploadedFiles.length} file(s) saved with this estimate.`);
+      }
     }
   }, [estimate]);
+
+  // Convert file to base64 for localStorage persistence
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -45,37 +58,51 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     setUploadStatus(`Parsing ${file.name}...`);
 
     try {
+      // Store file as base64 for persistence
+      const base64 = await fileToBase64(file);
+      const fileRecord = {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        data: base64,
+        uploadedAt: new Date().toISOString(),
+      };
+      setUploadedFiles(prev => {
+        // Replace if same filename, otherwise append
+        const existing = prev.filter(f => f.name !== file.name);
+        return [...existing, fileRecord];
+      });
+
       const ext = file.name.toLowerCase().split('.').pop();
 
       if (ext === 'pdf') {
         const result = await parseRoofRPDF(file);
         if (result.buildings.length > 0) {
           setBuildings(result.buildings);
-          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. Review measurements below.`);
+          setUploadStatus(`Parsed ${result.buildings.length} buildings from ${result.pageCount} pages. File saved. Review measurements below.`);
         } else {
-          setUploadStatus(`PDF parsed (${result.pageCount} pages) — no building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
+          setUploadStatus(`PDF parsed (${result.pageCount} pages) — file saved. No building data auto-detected. Add buildings manually or try uploading the matching spreadsheet export.`);
         }
       } else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
         if (estimateType === 'tpo') {
           const result = await parseBeamAIExcel(file);
           setTpoMaterials(result.materials);
-          setUploadStatus(`Imported ${result.materials.length} material line items from ${file.name}. Unit costs auto-matched where possible.`);
+          setUploadStatus(`Imported ${result.materials.length} material line items from ${file.name}. File saved.`);
         } else {
           const result = await parseShingleExcel(file);
           if (result.buildings.length > 0) {
             setBuildings(result.buildings);
             if (result.jobName && !estimateName) setEstimateName(result.jobName);
             if (result.companyName && !estimateName) setEstimateName(result.companyName);
-            setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". All measurements populated.`);
+            setUploadStatus(`Imported ${result.buildings.length} buildings from "${result.jobName || file.name}". File saved.`);
           } else {
-            // Try Beam AI format as fallback
             const beamResult = await parseBeamAIExcel(file);
             if (beamResult.materials.length > 0) {
               setTpoMaterials(beamResult.materials);
               setEstimateType('tpo');
-              setUploadStatus(`Detected Beam AI format — imported ${beamResult.materials.length} materials. Switched to TPO estimate type.`);
+              setUploadStatus(`Detected Beam AI format — imported ${beamResult.materials.length} materials. File saved.`);
             } else {
-              setUploadStatus(`No measurement data found. Ensure the file has a "Measurement Import" sheet or Beam AI TAKEOFF format.`);
+              setUploadStatus(`No measurement data found. File saved. Ensure the file has a "Measurement Import" sheet or Beam AI TAKEOFF format.`);
             }
           }
         }
@@ -88,6 +115,17 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
     }
 
     setParsing(false);
+  };
+
+  const handleRemoveFile = (fileName) => {
+    setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
+  };
+
+  const handleDownloadFile = (fileRecord) => {
+    const a = document.createElement('a');
+    a.href = fileRecord.data;
+    a.download = fileRecord.name;
+    a.click();
   };
 
   const handleAddBuilding = () => {
@@ -119,6 +157,7 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
       type: estimateType,
       buildings,
       tpoMaterials,
+      uploadedFiles,
       totalCost,
       updatedAt: new Date().toISOString(),
     };
@@ -220,6 +259,49 @@ export default function EstimateWizard({ estimate, onSave, onClose }) {
             : 'Roof-R PDF report or measurement spreadsheet'}
         </p>
       </div>
+
+      {/* Saved Files */}
+      {uploadedFiles.length > 0 && (
+        <div style={{
+          border: `1px solid ${C.gray200}`, borderRadius: 8,
+          padding: 12, backgroundColor: C.white,
+        }}>
+          <p style={{ fontSize: 12, fontWeight: 600, color: C.navy, marginBottom: 8 }}>
+            Saved Files ({uploadedFiles.length})
+          </p>
+          {uploadedFiles.map((f, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 8px', backgroundColor: C.gray50, borderRadius: 6,
+              marginBottom: i < uploadedFiles.length - 1 ? 6 : 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 16 }}>{f.name.endsWith('.pdf') ? '📄' : '📊'}</span>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: C.navy, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.name}
+                  </p>
+                  <p style={{ fontSize: 10, color: C.gray500, margin: 0 }}>
+                    {(f.size / 1024).toFixed(0)} KB · {new Date(f.uploadedAt).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button onClick={() => handleDownloadFile(f)}
+                  title="Download"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: C.blue, padding: '2px 4px' }}>
+                  ⬇️
+                </button>
+                <button onClick={() => handleRemoveFile(f.name)}
+                  title="Remove"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: C.red, padding: '2px 4px' }}>
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {uploadStatus && (
         <div style={{
