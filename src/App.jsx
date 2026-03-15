@@ -700,6 +700,8 @@ export default function App() {
             flex: 1,
             overflow: 'auto',
             backgroundColor: C.gray50,
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
           {renderModule()}
