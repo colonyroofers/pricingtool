@@ -37,6 +37,8 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [showOnlineNotice, setShowOnlineNotice] = useState(false);
+  const [unsavedDialog, setUnsavedDialog] = useState(null); // { action: fn } when nav blocked by unsaved changes
+  const estimateHasUnsavedRef = React.useRef(false);
 
   // Handle login
   const handleLogin = () => {
@@ -117,8 +119,21 @@ export default function App() {
   };
 
   const handleCloseEstimate = () => {
+    estimateHasUnsavedRef.current = false;
     setActiveEstimate(null);
     setActiveNav('dashboard');
+  };
+
+  // Ref-based save trigger — EstimateWizard sets this
+  const saveEstimateRef = React.useRef(null);
+
+  // Navigate away with unsaved-changes guard
+  const navigateAway = (action) => {
+    if (activeEstimate && activeNav === 'estimates' && estimateHasUnsavedRef.current) {
+      setUnsavedDialog({ action });
+    } else {
+      action();
+    }
   };
 
   const handleSaveEstimate = (updatedEstimate) => {
@@ -161,8 +176,10 @@ export default function App() {
           <EstimateWizard
             estimate={activeEstimate}
             onSave={handleSaveEstimate}
-            onClose={handleCloseEstimate}
+            onClose={() => navigateAway(handleCloseEstimate)}
             canViewMargin={canViewMargin}
+            onUnsavedChange={(hasUnsaved) => { estimateHasUnsavedRef.current = hasUnsaved; }}
+            saveRef={saveEstimateRef}
           />
         );
       case 'catalog':
@@ -443,12 +460,18 @@ export default function App() {
               key={item.key}
               className="pressable"
               onClick={() => {
-                if (item.key === 'estimates' && !activeEstimate) {
-                  setActiveNav('estimates');
-                  setActiveEstimate(null);
-                } else {
-                  setActiveNav(item.key);
-                }
+                const doNav = () => {
+                  if (item.key === 'estimates' && !activeEstimate) {
+                    setActiveNav('estimates');
+                    setActiveEstimate(null);
+                  } else {
+                    if (activeNav === 'estimates' && activeEstimate && item.key !== 'estimates') {
+                      setActiveEstimate(null);
+                    }
+                    setActiveNav(item.key);
+                  }
+                };
+                navigateAway(doNav);
               }}
               style={{
                 width: '100%',
@@ -486,7 +509,7 @@ export default function App() {
           {/* Analytics Item */}
           <button
             className="pressable"
-            onClick={() => setActiveNav('analytics')}
+            onClick={() => navigateAway(() => { if (activeEstimate) setActiveEstimate(null); setActiveNav('analytics'); })}
             style={{
               width: '100%',
               padding: '12px 12px',
@@ -715,6 +738,55 @@ export default function App() {
         currentEstimate={activeEstimate ? estimates.find(e => e.id === activeEstimate) : null}
         currentUser={currentUser}
       />
+
+      {/* Unsaved changes dialog */}
+      {unsavedDialog && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={() => setUnsavedDialog(null)}>
+          <div style={{
+            backgroundColor: C.white, borderRadius: 12, padding: 28, width: '100%', maxWidth: 400,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 600, color: C.navy }}>Unsaved Changes</h3>
+            <p style={{ margin: '0 0 24px', fontSize: 14, color: C.gray500, lineHeight: 1.5 }}>
+              You have unsaved changes on this estimate. Would you like to save before leaving?
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={() => {
+                  if (saveEstimateRef.current) saveEstimateRef.current();
+                  const action = unsavedDialog.action;
+                  setUnsavedDialog(null);
+                  estimateHasUnsavedRef.current = false;
+                  setTimeout(() => action(), 50);
+                }}
+                style={{ width: '100%', padding: 12, borderRadius: 8, border: 'none', backgroundColor: '#22C55E', color: C.white, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Save & Leave
+              </button>
+              <button
+                onClick={() => {
+                  const action = unsavedDialog.action;
+                  setUnsavedDialog(null);
+                  estimateHasUnsavedRef.current = false;
+                  action();
+                }}
+                style={{ width: '100%', padding: 12, borderRadius: 8, border: 'none', backgroundColor: '#DC2626', color: C.white, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Leave Without Saving
+              </button>
+              <button
+                onClick={() => setUnsavedDialog(null)}
+                style={{ width: '100%', padding: 12, borderRadius: 8, border: 'none', backgroundColor: C.gray100, color: C.gray600, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ToastProvider>
   );
 }

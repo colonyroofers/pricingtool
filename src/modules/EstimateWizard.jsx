@@ -26,7 +26,7 @@ const DEMO_BUILDINGS = [
   { siteplanNum: "5", roofrNum: "5", phase: 1, totalArea: 14695, pitchedArea: 14695, predominantPitch: "4/12", wastePercent: 14, eaves: 545.3, valleys: 590.5, hips: 407.7, ridges: 298.3, rakes: 410.6, wallFlashing: 201.7, stepFlashing: 89.3, pipes: 7, dryerVents: 3 },
 ];
 
-export default function EstimateWizard({ estimate, onSave, onClose, currentUser, canViewMargin }) {
+export default function EstimateWizard({ estimate, onSave, onClose, currentUser, canViewMargin, onUnsavedChange, saveRef }) {
   const { showToast } = useToast();
   const [step, setStep] = useState(1);
   const [saveConfirmation, setSaveConfirmation] = useState(null);
@@ -515,6 +515,16 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
     }
     setHasUnsavedChanges(true);
   }, [buildings, tpoMaterials, estimateName, marketState, estimateType, jobForkliftCost, jobDumpsterCost, jobPermitCost, jobMarginPercent, jobTaxPercent, warrantyEnabled, materialPriceOverrides]);
+
+  // Report unsaved state to parent (App.jsx) for nav-guard
+  useEffect(() => {
+    onUnsavedChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges]);
+
+  // Expose save function to parent via ref
+  useEffect(() => {
+    if (saveRef) saveRef.current = handleSave;
+  });
 
   // Warn before leaving if there are unsaved changes
   useEffect(() => {
@@ -1867,19 +1877,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
             {estimateName || 'New Estimate'}
           </h2>
           <button onClick={() => {
-              if (hasUnsavedChanges) {
-                setConfirmDialog({
-                  title: 'Unsaved Changes',
-                  message: 'You have unsaved changes. Leave without saving?',
-                  onConfirm: () => {
-                    setConfirmDialog(null);
-                    onClose();
-                  },
-                  onCancel: () => setConfirmDialog(null),
-                });
-              } else {
-                onClose();
-              }
+              onClose();
             }}
             style={{ padding: '6px 12px', backgroundColor: C.gray200, color: C.gray600, border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
             Back to Dashboard
