@@ -1869,7 +1869,7 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   }
 
   return (
-    <div style={{ width: '100%', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', backgroundColor: C.white, overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', backgroundColor: C.white, overflow: 'hidden' }}>
       {/* Header — fixed at top, content scrolls below */}
       <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.gray200}`, backgroundColor: C.white, zIndex: 20, flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
