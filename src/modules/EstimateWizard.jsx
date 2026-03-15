@@ -1869,9 +1869,9 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
   }
 
   return (
-    <div style={{ width: '100%', minHeight: '100%', display: 'flex', flexDirection: 'column', backgroundColor: C.white }}>
-      {/* Header — sticky so tabs stay visible when scrolling */}
-      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.gray200}`, position: 'sticky', top: 0, backgroundColor: C.white, zIndex: 20 }}>
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: C.white, overflow: 'hidden' }}>
+      {/* Header — fixed at top, content scrolls below */}
+      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.gray200}`, backgroundColor: C.white, zIndex: 20, flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h2 style={{ fontSize: 18, fontWeight: 600, color: C.navy }}>
             {estimateName || 'New Estimate'}
@@ -1903,8 +1903,8 @@ export default function EstimateWizard({ estimate, onSave, onClose, currentUser,
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, padding: 24 }}>
+      {/* Content — scrollable area */}
+      <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
         {step === 3 && renderCalculations()}
